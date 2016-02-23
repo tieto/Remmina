@@ -10,7 +10,7 @@ Build-Depends: debhelper (>= 9~),
  libssh-dev (>= 0.4),
  libvte-2.90-dev | libvte-2.91-dev,
  libxkbfile-dev,
- libfreerdp-dev (>= 1.1.0~),
+ freerdp2-dev,
  libtelepathy-glib-dev,
  libjpeg-dev,
  libgnutls-dev | libgnutls28-dev,
@@ -62,8 +62,7 @@ Package: remmina-plugin-rdp
 Architecture: any
 Depends: ${shlibs:Depends},
  ${misc:Depends},
- remmina (= ${binary:Version}),
- libfreerdp-plugins-standard (>= 1.2.0~)
+ remmina (= ${binary:Version})
 Description: RDP plugin for remmina remote desktop client
  Remmina is a remote desktop connection client able to display and control a
  remote desktop session.
