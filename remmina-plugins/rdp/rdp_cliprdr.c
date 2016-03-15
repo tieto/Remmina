@@ -44,6 +44,93 @@
 
 #define CLIPBOARD_TRANSFER_WAIT_TIME 2
 
+#undef TRACE_CALL
+#define TRACE_CALL(x) printf("%s\n",x)
+
+/* For file transfer, see https://github.com/FreeRDP/FreeRDP/blob/master/client/Windows/wf_cliprdr.c */
+
+/* Windows shell clipboard formats
+ * are registered locally as CF_LOCAL_FILEDESCRIPTOR CF_LOCAL_FILECONTENTS */
+#define CFSTR_FILEDESCRIPTORW "FileGroupDescriptorW"
+#define CFSTR_FILECONTENTS "FileContents"
+
+/* Some random local cliboard formats id */
+#define CF_LOCAL_FILEDESCRIPTOR 49288
+#define CF_LOCAL_FILECONTENTS 49290
+
+#define FD_ATTRIBUTES 0x04
+#define FD_WRITESTIME 0x20
+#define FD_FILESIZE 0x40
+#define FD_PROGRESSUI 0x4000
+const UINT64 EPOCH_DIFF = 11644473600ULL;
+
+#define WIN_MAX_PATH 0x0104
+
+
+typedef struct
+{
+    LONG        cx;
+    LONG        cy;
+} WIN_SIZEL;
+
+typedef struct {
+    ULONG  Data1;
+    USHORT Data2;
+    USHORT Data3;
+    BYTE  Data4[ 8 ];
+} WIN_CLSID;
+
+typedef struct {
+    LONG  x;
+    LONG  y;
+} WIN_POINTL;
+
+typedef struct _FILEDESCRIPTORW {
+	DWORD dwFlags;
+
+	WIN_CLSID clsid;
+	WIN_SIZEL sizel;
+	WIN_POINTL pointl;
+
+	DWORD dwFileAttributes;
+	FILETIME ftCreationTime;
+	FILETIME ftLastAccessTime;
+	FILETIME ftLastWriteTime;
+	DWORD nFileSizeHigh;
+	DWORD nFileSizeLow;
+	WCHAR  cFileName[ WIN_MAX_PATH ];
+} FILEDESCRIPTORW;
+
+typedef struct _FILEGROUPDESCRIPTORW {
+	UINT cItems;
+	FILEDESCRIPTORW fgd[1];
+} FILEGROUPDESCRIPTORW;
+
+struct rf_clipboard
+{
+	rfContext* rfi;
+	CliprdrClientContext* context;
+	wClipboard* system;
+	int requestedFormatId;
+
+	gboolean clipboard_busy;
+	UINT32 format;
+
+	pthread_mutex_t transfer_clip_mutex;
+	pthread_cond_t transfer_clip_cond;
+	enum  { SCDW_NONE, SCDW_BUSY_WAIT, SCDW_ASYNCWAIT } srv_clip_data_wait ;
+	gpointer srv_data;
+
+	/* For file transfer request */
+	CLIPRDR_FILE_CONTENTS_REQUEST* lastFileContentsRequest;
+
+	size_t nFiles;
+	size_t file_array_size;
+	char** file_names;
+	FILEDESCRIPTORW** fileDescriptor;
+};
+typedef struct rf_clipboard rfClipboard;
+
 UINT32 remmina_rdp_cliprdr_get_format_from_gdkatom(GdkAtom atom)
 {
 	TRACE_CALL("remmina_rdp_cliprdr_get_format_from_gdkatom");
@@ -157,157 +244,208 @@ static void crlf2lf(UINT8* data, size_t* size)
 	*size = out - data;
 }
 
-int remmina_rdp_cliprdr_server_file_contents_request(CliprdrClientContext* context, CLIPRDR_FILE_CONTENTS_REQUEST* fileContentsRequest)
+static UINT cliprdr_send_response_filecontents(rfClipboard* clipboard,
+											   UINT32 streamId, UINT32 size,
+											   BYTE* data)
 {
-	TRACE_CALL("remmina_rdp_cliprdr_server_file_contents_request");
-/*	UINT32 uSize = 0;
+	TRACE_CALL("cliprdr_send_response_filecontents");
+
+	CLIPRDR_FILE_CONTENTS_RESPONSE fileContentsResponse;
+
+	if (!clipboard || !clipboard->context || !clipboard->context->ClientFileContentsResponse)
+		return ERROR_INTERNAL_ERROR;
+
+	fileContentsResponse.streamId = streamId;
+	fileContentsResponse.cbRequested = size;
+	fileContentsResponse.requestedData = data;
+	fileContentsResponse.msgFlags = CB_RESPONSE_OK;
+
+	printf("GIO: sending filecontents response streamId=%d data=%p size=%u\n", streamId, (void *)data, size);
+	return clipboard->context->ClientFileContentsResponse(clipboard->context, &fileContentsResponse);
+}
+
+
+static BOOL remmina_cliprdr_get_file_contents(char* file_name, BYTE* buffer,
+										 LONG positionLow, LONG positionHigh,
+										 DWORD nRequested, DWORD* puSize)
+{
+	int fd;
+	off_t off, sk;
+	ssize_t nread;
+
+	if (!file_name || !buffer || !puSize)
+		return FALSE;
+
+	fd = open(file_name, O_RDONLY);
+	if (fd == -1)
+		return FALSE;
+
+	off = (off_t)positionLow + ((off_t)positionHigh << 32); /* ToDo: support positionHigh on 32bit systems */
+	sk = lseek(fd, off, SEEK_SET);
+
+	if (sk != off) {
+		close(fd);
+		return FALSE;
+	}
+
+	nread = read(fd, buffer, nRequested);
+
+	if (nread == -1) {
+		/* ToDo: support EINTR ? Log error message */
+		close(fd);
+		return FALSE;
+	}
+
+	printf("GIO: file is %s off=%u nRequested=%u nread=%d\n", file_name, (unsigned)off, (unsigned)nRequested, (int)nread);
+
+	close(fd);
+	*puSize = (DWORD)nread;
+
+	return TRUE;
+
+
+}
+
+
+static void remmina_rdp_cliprdr_mt_server_file_contents_request(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* ui)
+{
+	TRACE_CALL("remmina_rdp_cliprdr_mt_server_file_contents_request");
+
+	printf("GIO: remmina_rdp_cliprdr_mt_server_file_contents_request\n");
+
+	/* We are on the main thread. Subthread is doing other operations and not waiting for us.
+	 * We just ask the Gtk Clipboard to enumerate the URIS it have */
+
+	rfContext* rfi;
+	DWORD uSize = 0;
 	BYTE* pData = NULL;
-	HRESULT hRet = S_OK;
-	FORMATETC vFormatEtc;
-	LPDATAOBJECT pDataObj = NULL;
-	STGMEDIUM vStgMedium;
-	LPSTREAM pStream = NULL;
-	BOOL bIsStreamFile = TRUE;
-	static LPSTREAM pStreamStc = NULL;
-	static UINT32 uStreamIdStc = 0;
-	wfClipboard* clipboard = (wfClipboard*) context->custom;
-	if (fileContentsRequest->dwFlags == FILECONTENTS_SIZE)
-	fileContentsRequest->cbRequested = sizeof(UINT64);
+	int sRc;
+	char *fileName;
+	CLIPRDR_FILE_CONTENTS_REQUEST* fileContentsRequest;
+
+	rfi = GET_PLUGIN_DATA(gp);
+	if (!rfi || !rfi->clipboard || !rfi->clipboard->lastFileContentsRequest)
+		return;
+
+	fileContentsRequest = rfi->clipboard->lastFileContentsRequest;
+	printf("GIO: have a request for file listIndex=%d streamid=%d\n",fileContentsRequest->listIndex, fileContentsRequest->streamId);
+
+
+	if (fileContentsRequest->dwFlags == FILECONTENTS_SIZE) {
+		printf("GIO: request is for the size of the file\n");
+		fileContentsRequest->cbRequested = sizeof(UINT64);
+	}
+
 	pData = (BYTE*) calloc(1, fileContentsRequest->cbRequested);
 	if (!pData)
-	goto error;
-	hRet = OleGetClipboard(&pDataObj);
-	if (!SUCCEEDED(hRet))
-	{
-	WLog_ERR(TAG, "filecontents: get ole clipboard failed.");
-	goto error;
+		goto error;
+
+	fileName = rfi->clipboard->file_names[fileContentsRequest->listIndex];
+	if (fileContentsRequest->dwFlags == FILECONTENTS_SIZE) {
+		*((UINT32*) &pData[0]) = rfi->clipboard->fileDescriptor[fileContentsRequest->listIndex]->nFileSizeLow;
+		*((UINT32*) &pData[4]) = rfi->clipboard->fileDescriptor[fileContentsRequest->listIndex]->nFileSizeHigh;
+		uSize = fileContentsRequest->cbRequested;
+	} else {
+		BOOL bRet;
+		bRet = remmina_cliprdr_get_file_contents(rfi->clipboard->file_names[fileContentsRequest->listIndex], pData,
+			fileContentsRequest->nPositionLow, fileContentsRequest->nPositionHigh, fileContentsRequest->cbRequested, &uSize);
+		if (bRet == FALSE) {
+			uSize = 0;
+			goto error;
+		}
 	}
-	ZeroMemory(&vFormatEtc, sizeof(FORMATETC));
-	ZeroMemory(&vStgMedium, sizeof(STGMEDIUM));
-	vFormatEtc.cfFormat = clipboard->ID_FILECONTENTS;
-	vFormatEtc.tymed = TYMED_ISTREAM;
-	vFormatEtc.dwAspect = 1;
-	vFormatEtc.lindex = fileContentsRequest->listIndex;
-	vFormatEtc.ptd = NULL;
-	if ((uStreamIdStc != fileContentsRequest->streamId) || !pStreamStc)
-	{
-	LPENUMFORMATETC pEnumFormatEtc;
-	ULONG CeltFetched;
-	FORMATETC vFormatEtc2;
-	if (pStreamStc)
-	{
-	IStream_Release(pStreamStc);
-	pStreamStc = NULL;
-	}
-	bIsStreamFile = FALSE;
-	hRet = IDataObject_EnumFormatEtc(pDataObj, DATADIR_GET, &pEnumFormatEtc);
-	if (hRet == S_OK)
-	{
-	do
-	{
-	hRet = IEnumFORMATETC_Next(pEnumFormatEtc, 1, &vFormatEtc2, &CeltFetched);
-	if (hRet == S_OK)
-	{
-	if (vFormatEtc2.cfFormat == clipboard->ID_FILECONTENTS)
-	{
-	hRet = IDataObject_GetData(pDataObj, &vFormatEtc, &vStgMedium);
-	if (hRet == S_OK)
-	{
-	pStreamStc = vStgMedium.pstm;
-	uStreamIdStc = fileContentsRequest->streamId;
-	bIsStreamFile = TRUE;
-	}
-	break;
-	}
-	}
-	}
-	while (hRet == S_OK);
-	}
-	}
-	if (bIsStreamFile == TRUE)
-	{
-	if (fileContentsRequest->dwFlags == FILECONTENTS_SIZE)
-	{
-	STATSTG vStatStg;
-	ZeroMemory(&vStatStg, sizeof(STATSTG));
-	hRet = IStream_Stat(pStreamStc, &vStatStg, STATFLAG_NONAME);
-	if (hRet == S_OK)
-	{
-	*((UINT32*) &pData[0]) = vStatStg.cbSize.LowPart;
-	*((UINT32*) &pData[4]) = vStatStg.cbSize.HighPart;
-	uSize = fileContentsRequest->cbRequested;
-	}
-	}
-	else if (fileContentsRequest->dwFlags == FILECONTENTS_RANGE)
-	{
-	LARGE_INTEGER dlibMove;
-	ULARGE_INTEGER dlibNewPosition;
-	dlibMove.HighPart = fileContentsRequest->nPositionHigh;
-	dlibMove.LowPart = fileContentsRequest->nPositionLow;
-	hRet = IStream_Seek(pStreamStc, dlibMove, STREAM_SEEK_SET, &dlibNewPosition);
-	if (SUCCEEDED(hRet))
-	{
-	hRet = IStream_Read(pStreamStc, pData, fileContentsRequest->cbRequested, (PULONG) &uSize);
-	}
-	}
-	}
-	else
-	{
-	if (fileContentsRequest->dwFlags == FILECONTENTS_SIZE)
-	{
-	*((UINT32*) &pData[0]) = clipboard->fileDescriptor[fileContentsRequest->listIndex]->nFileSizeLow;
-	*((UINT32*) &pData[4]) = clipboard->fileDescriptor[fileContentsRequest->listIndex]->nFileSizeHigh;
-	uSize = fileContentsRequest->cbRequested;
-	}
-	else if (fileContentsRequest->dwFlags == FILECONTENTS_RANGE)
-	{
-	BOOL bRet;
-	bRet = wf_cliprdr_get_file_contents(clipboard->file_names[fileContentsRequest->listIndex], pData,
-	fileContentsRequest->nPositionLow, fileContentsRequest->nPositionHigh,
-	fileContentsRequest->cbRequested, &uSize);
-	if (bRet == FALSE)
-	{
-	WLog_ERR(TAG, "get file contents failed.");
-	uSize = 0;
-	goto error;
-	}
-	}
-	}
-	IDataObject_Release(pDataObj);
-	if (uSize == 0)
-	{
+
+
+error:
+	sRc = cliprdr_send_response_filecontents(rfi->clipboard, fileContentsRequest->streamId, uSize, pData);
+
 	free(pData);
-	pData = NULL;
-	}
-	cliprdr_send_response_filecontents(clipboard, fileContentsRequest->streamId, uSize, pData);
-	free(pData);
-	return 1;
-	error:
-	if (pData)
-	{
-	free(pData);
-	pData = NULL;
-	}
-	if (pDataObj)
-	{
-	IDataObject_Release(pDataObj);
-	pDataObj = NULL;
-	}
-	WLog_ERR(TAG, "filecontents: send failed response.");
-	cliprdr_send_response_filecontents(clipboard, fileContentsRequest->streamId, 0, NULL);
-	*/
-	return -1;
+
+	free(fileContentsRequest);
+	rfi->clipboard->lastFileContentsRequest = NULL;
+
 }
-int remmina_rdp_cliprdr_server_file_contents_response(CliprdrClientContext* context, CLIPRDR_FILE_CONTENTS_RESPONSE* fileContentsResponse)
+
+UINT remmina_rdp_cliprdr_server_file_contents_request(CliprdrClientContext* context, CLIPRDR_FILE_CONTENTS_REQUEST* fileContentsRequest)
+{
+	TRACE_CALL("remmina_rdp_cliprdr_server_file_contents_request");
+
+	/* Directly called by freerdp subthread when the user pastes a file on the remote desktop */
+
+	rfClipboard* clipboard = (rfClipboard*)context->custom;
+	RemminaProtocolWidget* gp;
+	rfContext* rfi;
+	RemminaPluginRdpUiObject *ui;
+
+	if (!context || !fileContentsRequest)
+		return ERROR_INTERNAL_ERROR;
+
+	clipboard = (rfClipboard*)context->custom;
+	if (!clipboard)
+		return ERROR_INTERNAL_ERROR;
+
+	rfi = clipboard->rfi;
+	if (!rfi)
+		return ERROR_INTERNAL_ERROR;
+
+	if (rfi->clipboard != clipboard) {
+		remmina_plugin_service->log_printf("[RDP] Internal error in %s: clipboard received from libfreerdp is not the same as the one in our rfContext\n", __FUNCTION__);
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	if (clipboard->lastFileContentsRequest) {
+		remmina_plugin_service->log_printf("[RDP] there is already an outstanting file contents request for this clipboad/connection. Cannot serve a second one.\n");
+		return ERROR_INTERNAL_ERROR;
+	}
+
+	clipboard->lastFileContentsRequest = malloc(sizeof(CLIPRDR_FILE_CONTENTS_REQUEST));
+	if (!clipboard->lastFileContentsRequest)
+		return ERROR_INTERNAL_ERROR;
+
+	*(clipboard->lastFileContentsRequest) = *(fileContentsRequest);
+
+	gp = clipboard->rfi->protocol_widget;
+
+	ui = g_new0(RemminaPluginRdpUiObject, 1);
+	ui->type = REMMINA_RDP_UI_CLIPBOARD;
+	ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_FILE_CONTENTS_REQUEST;
+	ui->sync = FALSE;
+	remmina_rdp_event_queue_ui(gp, ui);
+
+	return CHANNEL_RC_OK;
+}
+
+
+UINT remmina_rdp_cliprdr_server_file_contents_response(CliprdrClientContext* context, CLIPRDR_FILE_CONTENTS_RESPONSE* fileContentsResponse)
 {
 	TRACE_CALL("remmina_rdp_cliprdr_server_file_contents_response");
-	/*
-	wfClipboard* clipboard = (wfClipboard*) context->custom;
+/*	rfClipboard* clipboard;
+
+	if (fileContentsResponse->msgFlags != CB_RESPONSE_OK)
+		return E_FAIL;
+
+	if (!context || !fileContentsResponse)
+		return ERROR_INTERNAL_ERROR;
+
+	clipboard = (rfClipboard*) context->custom;
+
+	if (!clipboard)
+		return ERROR_INTERNAL_ERROR;
+
 	clipboard->req_fsize = fileContentsResponse->cbRequested;
 	clipboard->req_fdata = (char*) malloc(fileContentsResponse->cbRequested);
+	if (!clipboard->req_fdata)
+		return ERROR_INTERNAL_ERROR;
+
 	CopyMemory(clipboard->req_fdata, fileContentsResponse->requestedData, fileContentsResponse->cbRequested);
-	SetEvent(clipboard->req_fevent);
-	*/
+
+	if (!SetEvent(clipboard->req_fevent))
+	{
+		free (clipboard->req_fdata);
+		return ERROR_INTERNAL_ERROR;
+	}
+*/
+	return CHANNEL_RC_OK;
 	return 1;
 }
 
@@ -323,7 +461,6 @@ static UINT remmina_rdp_cliprdr_monitor_ready(CliprdrClientContext* context, CLI
 
 	ui = g_new0(RemminaPluginRdpUiObject, 1);
 	ui->type = REMMINA_RDP_UI_CLIPBOARD;
-	ui->clipboard.clipboard = clipboard;
 	ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_MONITORREADY;
 	ui->sync = TRUE;
 	remmina_rdp_event_queue_ui(gp, ui);
@@ -399,7 +536,6 @@ static UINT remmina_rdp_cliprdr_server_format_list(CliprdrClientContext* context
 
 	ui = g_new0(RemminaPluginRdpUiObject, 1);
 	ui->type = REMMINA_RDP_UI_CLIPBOARD;
-	ui->clipboard.clipboard = clipboard;
 	ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_SET_DATA;
 	ui->clipboard.targetlist = list;
 	ui->sync = TRUE;
@@ -411,6 +547,9 @@ static UINT remmina_rdp_cliprdr_server_format_list(CliprdrClientContext* context
 static UINT remmina_rdp_cliprdr_server_format_list_response(CliprdrClientContext* context, CLIPRDR_FORMAT_LIST_RESPONSE* formatListResponse)
 {
 	TRACE_CALL("remmina_rdp_cliprdr_server_format_list_response");
+
+	if (formatListResponse->msgFlags != CB_RESPONSE_OK)
+		return E_FAIL;
 	return CHANNEL_RC_OK;
 }
 
@@ -428,8 +567,7 @@ static UINT remmina_rdp_cliprdr_server_format_data_request(CliprdrClientContext*
 
 	ui = g_new0(RemminaPluginRdpUiObject, 1);
 	ui->type = REMMINA_RDP_UI_CLIPBOARD;
-	ui->clipboard.clipboard = clipboard;
-	ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_GET_DATA;
+	ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_SERVER_FORMAT_DATA_REQUEST;
 	ui->clipboard.format = formatDataRequest->requestedFormatId;
 	ui->sync = TRUE;
 	remmina_rdp_event_queue_ui(gp, ui);
@@ -463,7 +601,7 @@ static UINT remmina_rdp_cliprdr_server_format_data_response(CliprdrClientContext
 
 	if (size > 0)
 	{
-		switch (rfi->clipboard.format)
+		switch (rfi->clipboard->format)
 		{
 			case CF_UNICODETEXT:
 			{
@@ -562,7 +700,6 @@ static UINT remmina_rdp_cliprdr_server_format_data_response(CliprdrClientContext
 
 		ui = g_new0(RemminaPluginRdpUiObject, 1);
 		ui->type = REMMINA_RDP_UI_CLIPBOARD;
-		ui->clipboard.clipboard = clipboard;
 		ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_SET_CONTENT;
 		ui->clipboard.data = output;
 		ui->clipboard.format = clipboard->format;
@@ -590,17 +727,15 @@ void remmina_rdp_cliprdr_request_data(GtkClipboard *gtkClipboard, GtkSelectionDa
 	struct timeval tv;
 	int rc;
 
-	clipboard = &(rfi->clipboard);
+	clipboard = rfi->clipboard;
 	if ( clipboard->srv_clip_data_wait != SCDW_NONE ) {
 		remmina_plugin_service->log_printf("[RDP] Cannot paste now, I'm transferring clipboard data from server. Try again later\n");
 		return;
 	}
 
-
 	target = gtk_selection_data_get_target(selection_data);
 	// clipboard->format = remmina_rdp_cliprdr_get_format_from_gdkatom(target);
 	clipboard->format = info;
-
 
 	/* Request Clipboard content from the server */
 	ZeroMemory(&request, sizeof(CLIPRDR_FORMAT_DATA_REQUEST));
@@ -657,11 +792,14 @@ void remmina_rdp_cliprdr_empty_clipboard(GtkClipboard *gtkClipboard, rfClipboard
 	/* No need to do anything here */
 }
 
-int remmina_rdp_cliprdr_send_client_capabilities(rfClipboard* clipboard)
+static UINT remmina_rdp_cliprdr_send_client_capabilities(rfClipboard* clipboard)
 {
 	TRACE_CALL("remmina_rdp_cliprdr_send_client_capabilities");
 	CLIPRDR_CAPABILITIES capabilities;
 	CLIPRDR_GENERAL_CAPABILITY_SET generalCapabilitySet;
+
+	if (!clipboard || !clipboard->context || !clipboard->context->ClientCapabilities)
+		return ERROR_INTERNAL_ERROR;
 
 	capabilities.cCapabilitiesSets = 1;
 	capabilities.capabilitySets = (CLIPRDR_CAPABILITY_SET*) &(generalCapabilitySet);
@@ -670,11 +808,35 @@ int remmina_rdp_cliprdr_send_client_capabilities(rfClipboard* clipboard)
 	generalCapabilitySet.capabilitySetLength = 12;
 
 	generalCapabilitySet.version = CB_CAPS_VERSION_2;
-	generalCapabilitySet.generalFlags = CB_USE_LONG_FORMAT_NAMES;
+	generalCapabilitySet.generalFlags = CB_USE_LONG_FORMAT_NAMES | CB_STREAM_FILECLIP_ENABLED | CB_FILECLIP_NO_FILE_PATHS;
 
-	clipboard->context->ClientCapabilities(clipboard->context, &capabilities);
+	return clipboard->context->ClientCapabilities(clipboard->context, &capabilities);
 
-	return 1;
+}
+
+static gboolean remmina_rdp_cliprdr_is_valid_file_or_dir_uri(char *uri)
+{
+	struct stat sb;
+	char *unescaped_uri;
+
+	if (strncmp(uri, "file://", 7) != 0)
+		return FALSE;
+
+	unescaped_uri = g_uri_unescape_string(uri, NULL);
+
+	if (lstat(unescaped_uri+7, &sb) != 0) {
+		g_free(unescaped_uri);
+		return FALSE;
+	}
+
+	g_free(unescaped_uri);
+
+	if (!S_ISREG(sb.st_mode) && !S_ISDIR(sb.st_mode))
+		return FALSE;
+
+	printf("GIO: %s is a valid file URI\n", uri);
+
+	return TRUE;
 }
 
 int remmina_rdp_cliprdr_mt_send_format_list(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* ui)
@@ -684,21 +846,20 @@ int remmina_rdp_cliprdr_mt_send_format_list(RemminaProtocolWidget* gp, RemminaPl
 	rfClipboard* clipboard;
 	rfContext* rfi = GET_PLUGIN_DATA(gp);
 	GdkAtom* targets;
-	gboolean result = 0;
+	gboolean result = 0, hasfiles;
 	gint loccount, srvcount;
 	gint formatId, i;
 	CLIPRDR_FORMAT_LIST formatList;
 	CLIPRDR_FORMAT* formats;
 	CLIPRDR_FORMAT* formats_new;
+	gchar **uris, **urip;
 
-	clipboard = ui->clipboard.clipboard;
+	clipboard = rfi->clipboard;
+	if (!clipboard)
+		return 0;
+
 	formatList.formats = formats = NULL;
 	formatList.numFormats = 0;
-
-	if (clipboard->clipboard_wait) {
-		clipboard->clipboard_wait = FALSE;
-		return 0;
-	}
 
 	gtkClipboard = gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD);
 	if (gtkClipboard) {
@@ -706,16 +867,42 @@ int remmina_rdp_cliprdr_mt_send_format_list(RemminaProtocolWidget* gp, RemminaPl
 	}
 
 	if (result) {
-		formats = (CLIPRDR_FORMAT*)malloc(loccount * sizeof(CLIPRDR_FORMAT));
+		formats = (CLIPRDR_FORMAT*)malloc((loccount+1) * sizeof(CLIPRDR_FORMAT));
 		srvcount = 0;
-		for(i = 0 ; i < loccount ; i++)  {
-			formatId = remmina_rdp_cliprdr_get_format_from_gdkatom(targets[i]);
-			if ( formatId != 0 ) {
-				formats[srvcount].formatId = formatId;
-				formats[srvcount].formatName = NULL;
-				srvcount ++;
+
+		/* Check if we have some file uris on the local clipboard */
+		hasfiles = FALSE;
+		uris = gtk_clipboard_wait_for_uris(gtkClipboard);
+		if (uris) {
+			urip = uris;
+			while(*urip) {
+				if (remmina_rdp_cliprdr_is_valid_file_or_dir_uri(*urip))
+					hasfiles = TRUE;
+				urip++;
+			}
+			g_strfreev(uris);
+		}
+
+		if (hasfiles) {
+			printf("GIO: we have a file on the clipboard !\n");
+			formats[srvcount].formatId = CF_LOCAL_FILEDESCRIPTOR;
+			formats[srvcount].formatName = CFSTR_FILEDESCRIPTORW;
+			srvcount++;
+			formats[srvcount].formatId = CF_LOCAL_FILECONTENTS;
+			formats[srvcount].formatName = CFSTR_FILECONTENTS;
+			srvcount++;
+		} else {
+			for(i = 0 ; i < loccount ; i++)  {
+				/* Standard non-file format list */
+				formatId = remmina_rdp_cliprdr_get_format_from_gdkatom(targets[i]);
+				if ( formatId != 0 ) {
+					formats[srvcount].formatId = formatId;
+					formats[srvcount].formatName = NULL;
+					srvcount ++;
+				}
 			}
 		}
+
 		if (srvcount > 0) {
 			formats_new = (CLIPRDR_FORMAT*)realloc(formats, srvcount * sizeof(CLIPRDR_FORMAT));
 			if (formats_new == NULL) {
@@ -734,6 +921,7 @@ int remmina_rdp_cliprdr_mt_send_format_list(RemminaProtocolWidget* gp, RemminaPl
 	}
 
 	formatList.msgFlags = CB_RESPONSE_OK;
+	printf("GIO: sending %d formats to server\n", (int)formatList.numFormats);
 	clipboard->context->ClientFormatList(clipboard->context, &formatList);
 
 	if (formats)
@@ -754,43 +942,350 @@ static void remmina_rdp_cliprdr_send_data_response(rfClipboard* clipboard, BYTE*
 	response.dataLen = size;
 	response.requestedFormatData = data;
 	clipboard->context->ClientFormatDataResponse(clipboard->context, &response);
+	free(data);
 }
 
 
 int remmina_rdp_cliprdr_mt_monitor_ready(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* ui)
 {
 	TRACE_CALL("remmina_rdp_cliprdr_mt_monitor_ready");
-	rfClipboard *clipboard = ui->clipboard.clipboard;
+	rfContext* rfi;
+	rfClipboard *clipboard;
 
-	if ( clipboard->clipboard_wait )
-	{
-		clipboard->clipboard_wait = FALSE;
+	rfi = GET_PLUGIN_DATA(gp);
+	if (!rfi)
 		return 0;
-	}
+
+	clipboard = rfi->clipboard;
+	if (!clipboard)
+		return 0;
 
 	remmina_rdp_cliprdr_send_client_capabilities(clipboard);
 	remmina_rdp_cliprdr_mt_send_format_list(gp,ui);
 
-	clipboard->sync = TRUE;
 	return 1;
 }
 
-
-void remmina_rdp_cliprdr_get_clipboard_data(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* ui)
+/* path_name has a '/' at the end. e.g. /home/user/newfolder/, file_name is /home/user/newfolder/new.txt */
+static FILEDESCRIPTORW* remmina_cliprdr_get_file_descriptor(char* file_name, size_t pathLen)
 {
-	TRACE_CALL("remmina_rdp_cliprdr_get_clipboard_data");
+	TRACE_CALL("remmina_cliprdr_get_file_descriptor");
+
+	struct stat sb;
+	FILEDESCRIPTORW* fd;
+	UINT64 t;
+	char *ufn;
+	int cchFileName;
+
+	fd = (FILEDESCRIPTORW*) calloc(1, sizeof(FILEDESCRIPTORW));
+
+	if (!fd)
+		return NULL;
+
+	if (lstat(file_name, &sb) != 0) {
+		free(fd);
+		return NULL;
+	}
+
+	if (!S_ISREG(sb.st_mode) && !S_ISDIR(sb.st_mode)) {
+		free(fd);
+		return NULL;
+	}
+
+	fd->dwFlags = FD_ATTRIBUTES | FD_FILESIZE | FD_WRITESTIME | FD_PROGRESSUI;
+
+	/* Convert UNIX timestamp in sb.st_mtime to windows FILETIME.
+	 * Windows FILETIME has 100ns precision, starting from 1/1/1601  */
+
+	t = (UINT64)sb.st_mtim.tv_nsec / 100ULL + 10000000ULL * (sb.st_mtim.tv_sec + EPOCH_DIFF);
+
+	fd->ftLastWriteTime.dwLowDateTime = (DWORD)(t & 0xffffffffULL);
+	fd->ftLastWriteTime.dwHighDateTime = (DWORD)(t >> 32);
+
+	printf("GIO: file low time=%lu file high time=%lu\n", fd->ftLastWriteTime.dwLowDateTime, fd->ftLastWriteTime.dwHighDateTime);
+
+	fd->nFileSizeLow = (DWORD)(sb.st_size & 0xffffffffULL);
+	fd->nFileSizeHigh = (DWORD)(sb.st_size >> 32);
+
+	fd->dwFileAttributes = 0;
+	if (S_ISDIR(sb.st_mode))
+		fd->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+
+	/* The filename in file_name + pathLen must be converted to unicode
+	 * and put to fd->cFileName */
+
+	ufn = NULL;	// Asks ConvertToUnicode to allocate
+	cchFileName = ConvertToUnicode(CP_UTF8, 0, file_name + pathLen, -1, (WCHAR**)&ufn, 0);
+	if (cchFileName < 1 || cchFileName > ((sizeof(fd->cFileName)/sizeof(WCHAR))-1)) {
+		free(fd);
+		return NULL;
+	}
+	memcpy(fd->cFileName, ufn, cchFileName * sizeof(WCHAR));
+
+	return fd;
+}
+
+
+static BOOL remmina_cliprdr_array_ensure_capacity(rfClipboard* clipboard)
+{
+	TRACE_CALL("remmina_cliprdr_array_ensure_capacity");
+
+	if (!clipboard)
+		return FALSE;
+
+	if (clipboard->nFiles == clipboard->file_array_size)
+	{
+		size_t new_size;
+		FILEDESCRIPTORW **new_fd;
+		char **new_name;
+
+		new_size = (clipboard->file_array_size + 1) * 2;
+
+		new_fd = (FILEDESCRIPTORW**) realloc(clipboard->fileDescriptor,
+											 new_size * sizeof(FILEDESCRIPTORW*));
+		if (new_fd)
+			clipboard->fileDescriptor = new_fd;
+
+		new_name = (char**) realloc(clipboard->file_names, new_size * sizeof(char*));
+		if (new_name)
+			clipboard->file_names = new_name;
+
+		if (!new_fd || !new_name)
+			return FALSE;
+
+		clipboard->file_array_size = new_size;
+	}
+
+	return TRUE;
+}
+
+static void clear_file_array(rfClipboard* clipboard)
+{
+	size_t i;
+	if (!clipboard)
+		return;
+	if (clipboard->file_names) {
+		for (i = 0; i < clipboard->nFiles; i++) {
+			free(clipboard->file_names[i]);
+			clipboard->file_names[i] = NULL;
+		}
+		free (clipboard->file_names);
+		clipboard->file_names = NULL;
+	}
+	if (clipboard->fileDescriptor) {
+		for (i = 0; i < clipboard->nFiles; i++) {
+			free(clipboard->fileDescriptor[i]);
+			clipboard->fileDescriptor[i] = NULL;
+		}
+		free (clipboard->fileDescriptor);
+		clipboard->fileDescriptor = NULL;
+	}
+	clipboard->file_array_size = 0;
+	clipboard->nFiles = 0;
+
+}
+
+
+static BOOL remmina_cliprdr_add_to_file_arrays(rfClipboard* clipboard, char* full_file_name, size_t pathLen)
+{
+
+	TRACE_CALL("remmina_cliprdr_add_to_file_arrays");
+
+	size_t ffnlen;
+
+	if (!remmina_cliprdr_array_ensure_capacity(clipboard))
+		return FALSE;
+
+	ffnlen = strlen(full_file_name);
+
+	/* add to name array */
+	clipboard->file_names[clipboard->nFiles] = (char *) malloc(ffnlen + 1);
+	if (!clipboard->file_names[clipboard->nFiles])
+		return FALSE;
+
+	strncpy(clipboard->file_names[clipboard->nFiles], full_file_name, ffnlen+1);
+
+	/* add to descriptor array */
+	clipboard->fileDescriptor[clipboard->nFiles] = remmina_cliprdr_get_file_descriptor(full_file_name, pathLen);
+	if (!clipboard->fileDescriptor[clipboard->nFiles])
+	{
+		free (clipboard->file_names[clipboard->nFiles]);
+		return FALSE;
+	}
+
+	clipboard->nFiles++;
+
+	return TRUE;
+}
+
+static BOOL remmina_cliprdr_traverse_directory(rfClipboard* clipboard, char *dir_name, size_t pathLen)
+{
+	DIR *dir;
+	struct dirent de, *dep;
+	struct stat sb;
+	char *fullFileName;
+
+	if (!clipboard || !dir_name)
+		return FALSE;
+
+	dir = opendir(dir_name);
+	if (!dir)
+		return FALSE;
+
+	for(;;) {
+		if(readdir_r(dir, &de, &dep) != 0) {
+			return FALSE;
+		}
+		if (dep == NULL)
+			break;
+
+		if (strcmp(de.d_name,".") == 0 || strcmp(de.d_name,"..") == 0)
+			continue;
+
+		printf("GIO: file %s in dir %s\n", de.d_name, dir_name);
+
+		fullFileName = malloc(strlen(dir_name)+strlen(de.d_name)+2);
+		if (!fullFileName)
+			return FALSE;
+
+		strcpy(fullFileName, dir_name);
+		strcat(fullFileName, "/");
+		strcat(fullFileName, de.d_name);
+
+		if (lstat(fullFileName, &sb) != 0) {
+			free(fullFileName);
+			return FALSE;
+		}
+
+		if (S_ISDIR(sb.st_mode)) {
+			if (!remmina_cliprdr_add_to_file_arrays(clipboard, fullFileName, pathLen)) {
+				free(fullFileName);
+				return FALSE;
+			}
+			if (!remmina_cliprdr_traverse_directory(clipboard, fullFileName, pathLen)) {
+				free(fullFileName);
+				return FALSE;
+			}
+		} else if (S_ISREG(sb.st_mode)) {
+			if (!remmina_cliprdr_add_to_file_arrays(clipboard, fullFileName, pathLen)) {
+				free(fullFileName);
+				return FALSE;
+			}
+		}
+
+		free(fullFileName);
+
+	}
+
+	closedir(dir);
+
+	return TRUE;
+}
+
+static BOOL remmina_cliprdr_process_filename(rfClipboard* clipboard, char *fileUri)
+{
+
+	TRACE_CALL("remmina_cliprdr_process_filename");
+
+	size_t offset;
+	size_t pathLen;
+	char *fileName;
+
+	if (!clipboard || !fileUri)
+		return FALSE;
+
+	if (strncmp(fileUri, "file://", 7) != 0)
+		return FALSE;
+
+	fileName = g_uri_unescape_string(fileUri + 7, NULL);
+	offset = strlen(fileName);
+
+	/* find the last '/' in full file name, should work with utf-8 filenames too */
+	while(offset > 0) {
+		if (fileName[offset] == '/')
+			break;
+		else
+			offset--;
+	}
+	pathLen = offset + 1;
+	if (!remmina_cliprdr_add_to_file_arrays(clipboard, fileName, pathLen)) {
+		g_free(fileName);
+		return FALSE;
+	}
+	if ((clipboard->fileDescriptor[clipboard->nFiles - 1]->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+		if (!remmina_cliprdr_traverse_directory(clipboard, fileName, pathLen)) {
+			g_free(fileName);
+			return FALSE;
+		}
+	}
+	g_free(fileName);
+	return TRUE;
+
+}
+
+void remmina_rdp_cliprdr_mt_server_format_data_request(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* ui)
+{
+	TRACE_CALL("remmina_rdp_cliprdr_mt_server_format_data_request");
 	GtkClipboard* gtkClipboard;
-	rfClipboard* clipboard;
 	UINT8* inbuf = NULL;
 	UINT8* outbuf = NULL;
 	GdkPixbuf *image = NULL;
 	int size = 0;
-	rfContext* rfi = GET_PLUGIN_DATA(gp);
+	gchar **uris, **urip;
+	rfContext* rfi;
+	rfClipboard *clipboard;
+	FILEGROUPDESCRIPTORW* groupDsc;
+	int i;
 
-	clipboard = ui->clipboard.clipboard;
+	printf("GIO: remmina_rdp_cliprdr_mt_server_format_data_request() called for ui->clipboard.format = %d\n", ui->clipboard.format);
+
+	rfi = GET_PLUGIN_DATA(gp);
+	if (!rfi)
+		return;
+
+	clipboard = rfi->clipboard;
+	if (!clipboard)
+		return;
+
 	gtkClipboard = gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD);
-	if (gtkClipboard)
-	{
+	if (!gtkClipboard)
+		goto error;
+
+	if (ui->clipboard.format == CF_LOCAL_FILEDESCRIPTOR) {
+		/* Server is requesting us a file name, because we told him we have one
+		 * when responding to remmina_rdp_cliprdr_mt_send_format_list.
+		 *  */
+		uris = gtk_clipboard_wait_for_uris(gtkClipboard);
+
+		clear_file_array(clipboard);
+
+		urip = uris;
+		while(*urip) {
+			if (remmina_rdp_cliprdr_is_valid_file_or_dir_uri(*urip)) {
+				remmina_cliprdr_process_filename(clipboard, *urip);
+			}
+			urip++;
+		}
+		g_strfreev(uris);
+
+		size = sizeof(FILEGROUPDESCRIPTORW) + (clipboard->nFiles - 1) * sizeof(FILEDESCRIPTORW);
+		groupDsc = (FILEGROUPDESCRIPTORW*) malloc(size);
+		printf("GIO: Allocated buffer of %u bytes at address %p\n", size, (void*)groupDsc);
+		if (groupDsc) {
+			groupDsc->cItems = clipboard->nFiles;
+			for (i = 0; i < clipboard->nFiles; i++) {
+				printf("GIO: nFiles=%d i=%d name=%s\n", (int)clipboard->nFiles, i, clipboard->file_names[i]);
+				printf("GIO: clipboard->filedescriptor[%d] is at %p\n", i, (void *)clipboard->fileDescriptor[i]);
+				if (clipboard->fileDescriptor[i])
+					groupDsc->fgd[i] = *clipboard->fileDescriptor[i];
+			}
+			outbuf = (UINT8*)groupDsc;
+		} else
+			size = 0;
+
+	} else {
+
+
 		switch (ui->clipboard.format)
 		{
 			case CF_TEXT:
@@ -809,65 +1304,70 @@ void remmina_rdp_cliprdr_get_clipboard_data(RemminaProtocolWidget* gp, RemminaPl
 				image = gtk_clipboard_wait_for_image(gtkClipboard);
 				break;
 			}
+			case CF_LOCAL_FILEDESCRIPTOR:
+			{
+			}
+		}
+
+		if (inbuf != NULL || image != NULL)
+		{
+			switch (ui->clipboard.format)
+			{
+				case CF_TEXT:
+				case CB_FORMAT_HTML:
+				{
+					size = strlen((char*)inbuf);
+					outbuf = lf2crlf(inbuf, &size);
+					break;
+				}
+				case CF_UNICODETEXT:
+				{
+					size = strlen((char*)inbuf);
+					inbuf = lf2crlf(inbuf, &size);
+					size = (ConvertToUnicode(CP_UTF8, 0, (CHAR*)inbuf, -1, (WCHAR**)&outbuf, 0) ) * sizeof(WCHAR);
+					g_free(inbuf);
+					break;
+				}
+				case CB_FORMAT_PNG:
+				{
+					gchar* data;
+					gsize buffersize;
+					gdk_pixbuf_save_to_buffer(image, &data, &buffersize, "png", NULL, NULL);
+					outbuf = (UINT8*) malloc(buffersize);
+					memcpy(outbuf, data, buffersize);
+					size = buffersize;
+					g_object_unref(image);
+					break;
+				}
+				case CB_FORMAT_JPEG:
+				{
+					gchar* data;
+					gsize buffersize;
+					gdk_pixbuf_save_to_buffer(image, &data, &buffersize, "jpeg", NULL, NULL);
+					outbuf = (UINT8*) malloc(buffersize);
+					memcpy(outbuf, data, buffersize);
+					size = buffersize;
+					g_object_unref(image);
+					break;
+				}
+				case CF_DIB:
+				case CF_DIBV5:
+				{
+					gchar* data;
+					gsize buffersize;
+					gdk_pixbuf_save_to_buffer(image, &data, &buffersize, "bmp", NULL, NULL);
+					size = buffersize - 14;
+					outbuf = (UINT8*) malloc(size);
+					memcpy(outbuf, data + 14, size);
+					g_object_unref(image);
+					break;
+				}
+			}
 		}
 	}
 
-	/* No data received, send nothing */
-	if (inbuf != NULL || image != NULL)
-	{
-		switch (ui->clipboard.format)
-		{
-			case CF_TEXT:
-			case CB_FORMAT_HTML:
-			{
-				size = strlen((char*)inbuf);
-				outbuf = lf2crlf(inbuf, &size);
-				break;
-			}
-			case CF_UNICODETEXT:
-			{
-				size = strlen((char*)inbuf);
-				inbuf = lf2crlf(inbuf, &size);
-				size = (ConvertToUnicode(CP_UTF8, 0, (CHAR*)inbuf, -1, (WCHAR**)&outbuf, 0) ) * sizeof(WCHAR);
-				g_free(inbuf);
-				break;
-			}
-			case CB_FORMAT_PNG:
-			{
-				gchar* data;
-				gsize buffersize;
-				gdk_pixbuf_save_to_buffer(image, &data, &buffersize, "png", NULL, NULL);
-				outbuf = (UINT8*) malloc(buffersize);
-				memcpy(outbuf, data, buffersize);
-				size = buffersize;
-				g_object_unref(image);
-				break;
-			}
-			case CB_FORMAT_JPEG:
-			{
-				gchar* data;
-				gsize buffersize;
-				gdk_pixbuf_save_to_buffer(image, &data, &buffersize, "jpeg", NULL, NULL);
-				outbuf = (UINT8*) malloc(buffersize);
-				memcpy(outbuf, data, buffersize);
-				size = buffersize;
-				g_object_unref(image);
-				break;
-			}
-			case CF_DIB:
-			case CF_DIBV5:
-			{
-				gchar* data;
-				gsize buffersize;
-				gdk_pixbuf_save_to_buffer(image, &data, &buffersize, "bmp", NULL, NULL);
-				size = buffersize - 14;
-				outbuf = (UINT8*) malloc(size);
-				memcpy(outbuf, data + 14, size);
-				g_object_unref(image);
-				break;
-			}
-		}
-	}
+error:
+
 	remmina_rdp_cliprdr_send_data_response(clipboard, outbuf, size);
 }
 void remmina_rdp_cliprdr_set_clipboard_content(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* ui)
@@ -894,15 +1394,21 @@ void remmina_rdp_cliprdr_set_clipboard_data(RemminaProtocolWidget* gp, RemminaPl
 	GtkClipboard* gtkClipboard;
 	GtkTargetEntry* targets;
 	gint n_targets;
-	rfContext* rfi = GET_PLUGIN_DATA(gp);
+	rfContext* rfi;
 	rfClipboard* clipboard;
 
-	clipboard = ui->clipboard.clipboard;
+	rfi = GET_PLUGIN_DATA(gp);
+	if (!rfi)
+		return;
+
+	clipboard = rfi->clipboard;
+	if (!clipboard)
+		return;
+
 	targets = gtk_target_table_new_from_list(ui->clipboard.targetlist, &n_targets);
 	gtkClipboard = gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD);
 	if (gtkClipboard && targets)
 	{
-		clipboard->clipboard_wait = TRUE;
 		gtk_clipboard_set_with_owner(gtkClipboard, targets, n_targets,
 				(GtkClipboardGetFunc) remmina_rdp_cliprdr_request_data,
 				(GtkClipboardClearFunc) remmina_rdp_cliprdr_empty_clipboard, G_OBJECT(gp));
@@ -938,8 +1444,8 @@ void remmina_rdp_event_process_clipboard(RemminaProtocolWidget* gp, RemminaPlugi
 			remmina_rdp_cliprdr_mt_monitor_ready(gp, ui);
 			break;
 
-		case REMMINA_RDP_UI_CLIPBOARD_GET_DATA:
-			remmina_rdp_cliprdr_get_clipboard_data(gp, ui);
+		case REMMINA_RDP_UI_CLIPBOARD_SERVER_FORMAT_DATA_REQUEST:
+			remmina_rdp_cliprdr_mt_server_format_data_request(gp, ui);
 			break;
 
 		case REMMINA_RDP_UI_CLIPBOARD_SET_DATA:
@@ -954,18 +1460,46 @@ void remmina_rdp_event_process_clipboard(RemminaProtocolWidget* gp, RemminaPlugi
 			remmina_rdp_cliprdr_detach_owner(gp, ui);
 			break;
 
+		case REMMINA_RDP_UI_CLIPBOARD_FILE_CONTENTS_REQUEST:
+			remmina_rdp_cliprdr_mt_server_file_contents_request(gp, ui);
+			break;
+
 	}
 }
 
-void remmina_rdp_clipboard_init(rfContext *rfi)
+gboolean remmina_rdp_clipboard_init(rfContext *rfi)
 {
 	TRACE_CALL("remmina_rdp_clipboard_init");
-	// Future: initialize rfi->clipboard
+	rfi->clipboard = (rfClipboard*)malloc(sizeof(rfClipboard));
+	if (!rfi->clipboard)
+		return FALSE;
+	rfi->clipboard->rfi = rfi;
+	rfi->clipboard->lastFileContentsRequest = NULL;
+	rfi->clipboard->nFiles = 0;
+	rfi->clipboard->file_array_size = 0;
+	rfi->clipboard->file_names = NULL;
+	rfi->clipboard->fileDescriptor = NULL;
+	return TRUE;
 }
+
 void remmina_rdp_clipboard_free(rfContext *rfi)
 {
 	TRACE_CALL("remmina_rdp_clipboard_free");
-	// Future: deinitialize rfi->clipboard
+
+	if (!rfi->clipboard)
+		return;
+
+	// deinitialize rfi->clipboard
+
+	if (rfi->clipboard->lastFileContentsRequest) {
+		free(rfi->clipboard->lastFileContentsRequest);
+		rfi->clipboard->lastFileContentsRequest = NULL;
+	}
+
+	clear_file_array(rfi->clipboard);
+
+	free(rfi->clipboard);
+	rfi->clipboard = NULL;
 }
 
 
@@ -973,16 +1507,18 @@ void remmina_rdp_cliprdr_init(rfContext* rfi, CliprdrClientContext* cliprdr)
 {
 	TRACE_CALL("remmina_rdp_cliprdr_init");
 
-	rfClipboard* clipboard;
-	clipboard = &(rfi->clipboard);
+	printf("GIO: sizeof(LONG)=%u sizeof(WIN_POINTL)=%u sizeof(long)=%u sizeof(UINT)=%u\n", (unsigned)sizeof(LONG), (unsigned)sizeof(WIN_POINTL),
+		(unsigned)sizeof(long),(unsigned)sizeof(UINT));
 
-	rfi->clipboard.rfi = rfi;
-	cliprdr->custom = (void*)clipboard;
+	if (!remmina_rdp_clipboard_init(rfi))
+		return;
 
-	clipboard->context = cliprdr;
-	pthread_mutex_init(&clipboard->transfer_clip_mutex, NULL);
-	pthread_cond_init(&clipboard->transfer_clip_cond,NULL);
-	clipboard->srv_clip_data_wait = SCDW_NONE;
+	cliprdr->custom = (void*)rfi->clipboard;
+	rfi->clipboard->context = cliprdr;
+
+	pthread_mutex_init(&rfi->clipboard->transfer_clip_mutex, NULL);
+	pthread_cond_init(&rfi->clipboard->transfer_clip_cond,NULL);
+	rfi->clipboard->srv_clip_data_wait = SCDW_NONE;
 
 	cliprdr->MonitorReady = remmina_rdp_cliprdr_monitor_ready;
 	cliprdr->ServerCapabilities = remmina_rdp_cliprdr_server_capabilities;
@@ -991,8 +1527,8 @@ void remmina_rdp_cliprdr_init(rfContext* rfi, CliprdrClientContext* cliprdr)
 	cliprdr->ServerFormatDataRequest = remmina_rdp_cliprdr_server_format_data_request;
 	cliprdr->ServerFormatDataResponse = remmina_rdp_cliprdr_server_format_data_response;
 
-//	cliprdr->ServerFileContentsRequest = remmina_rdp_cliprdr_server_file_contents_request;
-//	cliprdr->ServerFileContentsResponse = remmina_rdp_cliprdr_server_file_contents_response;
+	cliprdr->ServerFileContentsRequest = remmina_rdp_cliprdr_server_file_contents_request;
+	cliprdr->ServerFileContentsResponse = remmina_rdp_cliprdr_server_file_contents_response;
 
 }
 

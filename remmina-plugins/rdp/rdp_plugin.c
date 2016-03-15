@@ -503,7 +503,6 @@ static BOOL remmina_rdp_post_connect(freerdp* instance)
 	instance->update->EndPaint = rf_end_paint;
 	instance->update->DesktopResize = rf_desktop_resize;
 
-	remmina_rdp_clipboard_init(rfi);
 	freerdp_channels_post_connect(instance->context->channels, instance);
 	rfi->connected = True;
 

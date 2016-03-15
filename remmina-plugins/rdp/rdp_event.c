@@ -591,20 +591,14 @@ gboolean remmina_rdp_event_on_clipboard(GtkClipboard *gtkClipboard, GdkEvent *ev
 	TRACE_CALL("remmina_rdp_event_on_clipboard");
 	RemminaPluginRdpUiObject* ui;
 	rfContext* rfi = GET_PLUGIN_DATA(gp);
-	rfClipboard* clipboard;
 
-	if (!rfi || !rfi->connected || rfi->is_reconnecting)
+	if (!rfi || !rfi->connected || rfi->is_reconnecting || !rfi->clipboard)
 		return FALSE;
 
-	clipboard = &(rfi->clipboard);
-
-	if ( clipboard->sync ) {
-		ui = g_new0(RemminaPluginRdpUiObject, 1);
-		ui->type = REMMINA_RDP_UI_CLIPBOARD;
-		ui->clipboard.clipboard = clipboard;
-		ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_FORMATLIST;
-		remmina_rdp_event_queue_ui(gp, ui);
-	}
+	ui = g_new0(RemminaPluginRdpUiObject, 1);
+	ui->type = REMMINA_RDP_UI_CLIPBOARD;
+	ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_FORMATLIST;
+	remmina_rdp_event_queue_ui(gp, ui);
 
 	return TRUE;
 }
@@ -615,7 +609,7 @@ void remmina_rdp_event_init(RemminaProtocolWidget* gp)
 	gchar* s;
 	gint flags;
 	rfContext* rfi = GET_PLUGIN_DATA(gp);
-	GtkClipboard* clipboard;
+	GtkClipboard* gtkClipboard;
 
 	if (!rfi) return;
 
@@ -655,8 +649,8 @@ void remmina_rdp_event_init(RemminaProtocolWidget* gp)
 	RemminaFile* remminafile = remmina_plugin_service->protocol_plugin_get_file(gp);
 	if (!remmina_plugin_service->file_get_int(remminafile, "disableclipboard", FALSE))
 	{
-		clipboard = gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD);
-		rfi->clipboard.clipboard_handler = g_signal_connect(clipboard, "owner-change", G_CALLBACK(remmina_rdp_event_on_clipboard), gp);
+		gtkClipboard = gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD);
+		rfi->clipboard_owner_change_handler = g_signal_connect(gtkClipboard, "owner-change", G_CALLBACK(remmina_rdp_event_on_clipboard), gp);
 	}
 
 	rfi->pressed_keys = g_array_new(FALSE, TRUE, sizeof (DWORD));
@@ -722,10 +716,10 @@ void remmina_rdp_event_uninit(RemminaProtocolWidget* gp)
 	if (!rfi) return;
 
 	/* unregister the clipboard monitor */
-	if (rfi->clipboard.clipboard_handler)
+	if (rfi->clipboard_owner_change_handler)
 	{
-		g_signal_handler_disconnect(G_OBJECT(gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD)), rfi->clipboard.clipboard_handler);
-		rfi->clipboard.clipboard_handler = 0;
+		g_signal_handler_disconnect(G_OBJECT(gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD)), rfi->clipboard_owner_change_handler);
+		rfi->clipboard_owner_change_handler = 0;
 	}
 	if (rfi->scale_handler)
 	{
@@ -836,7 +830,7 @@ static void remmina_rdp_event_connected(RemminaProtocolWidget* gp, RemminaPlugin
 	remmina_rdp_event_create_cairo_surface(rfi);
 	gtk_widget_queue_draw_area(rfi->drawing_area, 0, 0, rfi->width, rfi->height);
 
-	if (rfi->clipboard.clipboard_handler)
+	if (rfi->clipboard_owner_change_handler)
 	{
 		remmina_rdp_event_on_clipboard(NULL, NULL, gp);
 	}
