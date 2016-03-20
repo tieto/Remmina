@@ -66,6 +66,8 @@ const UINT64 EPOCH_DIFF = 11644473600ULL;
 
 #define WIN_MAX_PATH 0x0104
 
+#define MAX_FILES_TO_TRANSFER 100
+
 
 typedef struct
 {
@@ -1002,8 +1004,6 @@ static FILEDESCRIPTORW* remmina_cliprdr_get_file_descriptor(char* file_name, siz
 	fd->ftLastWriteTime.dwLowDateTime = (DWORD)(t & 0xffffffffULL);
 	fd->ftLastWriteTime.dwHighDateTime = (DWORD)(t >> 32);
 
-	printf("GIO: file low time=%lu file high time=%lu\n", fd->ftLastWriteTime.dwLowDateTime, fd->ftLastWriteTime.dwHighDateTime);
-
 	fd->nFileSizeLow = (DWORD)(sb.st_size & 0xffffffffULL);
 	fd->nFileSizeHigh = (DWORD)(sb.st_size >> 32);
 
@@ -1021,42 +1021,9 @@ static FILEDESCRIPTORW* remmina_cliprdr_get_file_descriptor(char* file_name, siz
 		return NULL;
 	}
 	memcpy(fd->cFileName, ufn, cchFileName * sizeof(WCHAR));
+	free(ufn);
 
 	return fd;
-}
-
-
-static BOOL remmina_cliprdr_array_ensure_capacity(rfClipboard* clipboard)
-{
-	TRACE_CALL("remmina_cliprdr_array_ensure_capacity");
-
-	if (!clipboard)
-		return FALSE;
-
-	if (clipboard->nFiles == clipboard->file_array_size)
-	{
-		size_t new_size;
-		FILEDESCRIPTORW **new_fd;
-		char **new_name;
-
-		new_size = (clipboard->file_array_size + 1) * 2;
-
-		new_fd = (FILEDESCRIPTORW**) realloc(clipboard->fileDescriptor,
-											 new_size * sizeof(FILEDESCRIPTORW*));
-		if (new_fd)
-			clipboard->fileDescriptor = new_fd;
-
-		new_name = (char**) realloc(clipboard->file_names, new_size * sizeof(char*));
-		if (new_name)
-			clipboard->file_names = new_name;
-
-		if (!new_fd || !new_name)
-			return FALSE;
-
-		clipboard->file_array_size = new_size;
-	}
-
-	return TRUE;
 }
 
 static void clear_file_array(rfClipboard* clipboard)
@@ -1084,6 +1051,51 @@ static void clear_file_array(rfClipboard* clipboard)
 	clipboard->nFiles = 0;
 
 }
+
+
+static BOOL remmina_cliprdr_array_ensure_capacity(rfClipboard* clipboard)
+{
+	TRACE_CALL("remmina_cliprdr_array_ensure_capacity");
+
+	if (!clipboard)
+		return FALSE;
+
+	if (clipboard->file_array_size >= MAX_FILES_TO_TRANSFER) {
+		remmina_plugin_service->log_printf("[RDP][%s] too many files to transfer (max is %u), aborting clipboard file list operation\n",
+			clipboard->rfi->settings->ServerHostname, MAX_FILES_TO_TRANSFER);
+		clear_file_array(clipboard);
+		return FALSE;
+	}
+
+	if (clipboard->nFiles == clipboard->file_array_size)
+	{
+		size_t new_size;
+		FILEDESCRIPTORW **new_fd;
+		char **new_name;
+
+		new_size = (clipboard->file_array_size + 1) * 2;
+		if (new_size > MAX_FILES_TO_TRANSFER)
+			new_size = MAX_FILES_TO_TRANSFER;
+
+		new_fd = (FILEDESCRIPTORW**) realloc(clipboard->fileDescriptor,
+											 new_size * sizeof(FILEDESCRIPTORW*));
+		if (new_fd)
+			clipboard->fileDescriptor = new_fd;
+
+		new_name = (char**) realloc(clipboard->file_names, new_size * sizeof(char*));
+		if (new_name)
+			clipboard->file_names = new_name;
+
+		if (!new_fd || !new_name)
+			return FALSE;
+
+		clipboard->file_array_size = new_size;
+	}
+
+	return TRUE;
+}
+
+
 
 
 static BOOL remmina_cliprdr_add_to_file_arrays(rfClipboard* clipboard, char* full_file_name, size_t pathLen)
