@@ -43,6 +43,7 @@
 #include <freerdp/locale/keyboard.h>
 #include <X11/XKBlib.h>
 
+
 static void remmina_rdp_event_on_focus_in(GtkWidget* widget, GdkEventKey* event, RemminaProtocolWidget* gp)
 {
 	TRACE_CALL("remmina_rdp_event_on_focus_in");
@@ -586,14 +587,21 @@ static gboolean remmina_rdp_event_on_key(GtkWidget* widget, GdkEventKey* event, 
 	return TRUE;
 }
 
-gboolean remmina_rdp_event_on_clipboard(GtkClipboard *gtkClipboard, GdkEvent *event, RemminaProtocolWidget *gp)
+gboolean remmina_rdp_event_on_clipboard_owner_change(GtkClipboard *gtkClipboard, GdkEvent *event, RemminaProtocolWidget *gp)
 {
-	TRACE_CALL("remmina_rdp_event_on_clipboard");
+	TRACE_CALL("remmina_rdp_event_on_clipboard_owner_change");
 	RemminaPluginRdpUiObject* ui;
 	rfContext* rfi = GET_PLUGIN_DATA(gp);
 
 	if (!rfi || !rfi->connected || rfi->is_reconnecting || !rfi->clipboard)
 		return FALSE;
+
+	printf("GIO: gtkclipboard owner changed\n");
+	if (rfi->gtk_clipboard_ignore_next_owner_change) {
+		rfi->gtk_clipboard_ignore_next_owner_change = FALSE;
+		printf("    ignored\n");
+		return TRUE;
+	}
 
 	ui = g_new0(RemminaPluginRdpUiObject, 1);
 	ui->type = REMMINA_RDP_UI_CLIPBOARD;
@@ -650,7 +658,8 @@ void remmina_rdp_event_init(RemminaProtocolWidget* gp)
 	if (!remmina_plugin_service->file_get_int(remminafile, "disableclipboard", FALSE))
 	{
 		gtkClipboard = gtk_widget_get_clipboard(rfi->drawing_area, GDK_SELECTION_CLIPBOARD);
-		rfi->clipboard_owner_change_handler = g_signal_connect(gtkClipboard, "owner-change", G_CALLBACK(remmina_rdp_event_on_clipboard), gp);
+		rfi->gtk_clipboard_ignore_next_owner_change = FALSE;
+		rfi->clipboard_owner_change_handler = g_signal_connect(gtkClipboard, "owner-change", G_CALLBACK(remmina_rdp_event_on_clipboard_owner_change), gp);
 	}
 
 	rfi->pressed_keys = g_array_new(FALSE, TRUE, sizeof (DWORD));
@@ -830,10 +839,16 @@ static void remmina_rdp_event_connected(RemminaProtocolWidget* gp, RemminaPlugin
 	remmina_rdp_event_create_cairo_surface(rfi);
 	gtk_widget_queue_draw_area(rfi->drawing_area, 0, 0, rfi->width, rfi->height);
 
+/*
 	if (rfi->clipboard_owner_change_handler)
 	{
-		remmina_rdp_event_on_clipboard(NULL, NULL, gp);
+		// Send the format list to the server
+		ui = g_new0(RemminaPluginRdpUiObject, 1);
+		ui->type = REMMINA_RDP_UI_CLIPBOARD;
+		ui->clipboard.type = REMMINA_RDP_UI_CLIPBOARD_FORMATLIST;
+		remmina_rdp_event_queue_ui(gp, ui);
 	}
+*/
 	remmina_rdp_event_update_scale(gp);
 }
 

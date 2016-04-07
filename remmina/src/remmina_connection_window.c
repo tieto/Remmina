@@ -56,6 +56,7 @@
 #include "remmina_log.h"
 #include "remmina/remmina_trace_calls.h"
 
+
 #ifndef WITH_SURVEY
 gchar *remmina_pref_file;
 RemminaPref remmina_pref;
@@ -67,9 +68,9 @@ G_DEFINE_TYPE( RemminaConnectionWindow, remmina_connection_window, GTK_TYPE_WIND
 
 #define FLOATING_TOOLBAR_WIDGET (GTK_CHECK_VERSION(3, 10, 0))
 
-	typedef struct _RemminaConnectionHolder RemminaConnectionHolder;
+typedef struct _RemminaConnectionHolder RemminaConnectionHolder;
 
-	struct _RemminaConnectionWindowPriv
+struct _RemminaConnectionWindowPriv
 {
 	RemminaConnectionHolder* cnnhld;
 
@@ -106,6 +107,7 @@ G_DEFINE_TYPE( RemminaConnectionWindow, remmina_connection_window, GTK_TYPE_WIND
 	GtkToolItem* toolitem_scale;
 	GtkToolItem* toolitem_grab;
 	GtkToolItem* toolitem_preferences;
+	GtkToolItem* toolitem_pastefiles;
 	GtkToolItem* toolitem_tools;
 	GtkToolItem* toolitem_screenshot;
 	GtkWidget* fullscreen_option_button;
@@ -780,21 +782,21 @@ static void remmina_connection_holder_toolbar_autofit(GtkWidget* widget, Remmina
 	TRACE_CALL("remmina_connection_holder_toolbar_autofit");
 	DECLARE_CNNOBJ
 
-		if (GTK_IS_SCROLLED_WINDOW(cnnobj->scrolled_container))
+	if (GTK_IS_SCROLLED_WINDOW(cnnobj->scrolled_container))
+	{
+		if ((gdk_window_get_state(gtk_widget_get_window(GTK_WIDGET(cnnhld->cnnwin))) & GDK_WINDOW_STATE_MAXIMIZED) != 0)
 		{
-			if ((gdk_window_get_state(gtk_widget_get_window(GTK_WIDGET(cnnhld->cnnwin))) & GDK_WINDOW_STATE_MAXIMIZED) != 0)
-			{
-				gtk_window_unmaximize(GTK_WINDOW(cnnhld->cnnwin));
-			}
-
-			/* It's tricky to make the toolbars disappear automatically, while keeping scrollable.
-			   Please tell me if you know a better way to do this */
-			gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(cnnobj->scrolled_container), GTK_POLICY_NEVER,
-					GTK_POLICY_NEVER);
-
-			/* ToDo: save returned source id in priv->something and then delete when main object is destroyed */
-			g_timeout_add(200, (GSourceFunc) remmina_connection_holder_toolbar_autofit_restore, cnnhld);
+			gtk_window_unmaximize(GTK_WINDOW(cnnhld->cnnwin));
 		}
+
+		/* It's tricky to make the toolbars disappear automatically, while keeping scrollable.
+		   Please tell me if you know a better way to do this */
+		gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(cnnobj->scrolled_container), GTK_POLICY_NEVER,
+				GTK_POLICY_NEVER);
+
+		/* ToDo: save returned source id in priv->something and then delete when main object is destroyed */
+		g_timeout_add(200, (GSourceFunc) remmina_connection_holder_toolbar_autofit_restore, cnnhld);
+	}
 
 }
 
@@ -1558,6 +1560,80 @@ static void remmina_connection_holder_toolbar_tools(GtkWidget* widget, RemminaCo
 	gtk_menu_popup(GTK_MENU(menu), NULL, NULL, remmina_public_popup_position, widget, 0, gtk_get_current_event_time());
 }
 
+static gboolean clipboard_has_remmina_files(GtkClipboard *gtkClipboard)
+{
+	gchar **uris, **urip;
+	gboolean hasrf;
+
+	uris = gtk_clipboard_wait_for_uris(gtkClipboard);
+	hasrf = FALSE;
+	if (uris) {
+		urip = uris;
+		while(*urip) {
+			if (strncmp(*urip, REMMINA_REMOTEFILE_URI_SCHEME, sizeof(REMMINA_REMOTEFILE_URI_SCHEME)-1) == 0) {
+				hasrf = TRUE;
+				break;
+			}
+			urip++;
+		}
+		g_strfreev(uris);
+	}
+	return hasrf;
+}
+
+static void cliprqcb(GtkClipboard *clipboard, GtkSelectionData *selection_data, gpointer data)
+{
+	TRACE_CALL("cliprqcb");
+	printf("GIO: in remmina_connection_window.c, this is the callback for file data requested\n");
+}
+
+static void remmina_connection_holder_toolbar_pastefiles(GtkWidget* widget, RemminaConnectionHolder* cnnhld)
+{
+	TRACE_CALL("remmina_connection_holder_toolbar_pastefiles");
+
+	RemminaProtocolWidget *gp;
+	gint res;
+	GtkWidget *dialog;
+	GtkClipboard *gtkClipboard;
+
+	DECLARE_CNNOBJ
+	gp = REMMINA_PROTOCOL_WIDGET(cnnobj->proto);
+
+	/* Ensure that the clipboard has remminaremotefiles://mypid/filename uris inside */
+	gtkClipboard = gtk_widget_get_clipboard(widget, GDK_SELECTION_CLIPBOARD);
+	if (!clipboard_has_remmina_files(gtkClipboard))
+		return;
+
+	dialog = gtk_file_chooser_dialog_new (_("Choose destination directory"),
+                                      GTK_WINDOW(cnnhld->cnnwin),
+                                      GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+                                      _("_Cancel"),
+                                      GTK_RESPONSE_CANCEL,
+                                      _("_Save files to dir"),
+                                      GTK_RESPONSE_ACCEPT,
+                                      NULL);
+
+	res = gtk_dialog_run (GTK_DIALOG (dialog));
+	if (res == GTK_RESPONSE_ACCEPT)
+	{
+		char *destdirname;
+		GtkFileChooser *chooser = GTK_FILE_CHOOSER (dialog);
+		destdirname = gtk_file_chooser_get_filename (chooser);
+		printf("GIO: pasting files to %s\n", destdirname);
+
+		/* Ask the clipboard for "x-special/remmina-copied-files", this should start
+		 * the paste operation from the plugin side */
+		GdkAtom atom = gdk_atom_intern(REMMINA_REMOTEFILE_CLIPBOARD_ATOM_NAME, FALSE);
+		gtk_clipboard_request_contents(gtkClipboard, atom, cliprqcb, NULL);
+
+		g_free(destdirname);
+	}
+
+	gtk_widget_destroy (dialog);
+
+}
+
+
 static void remmina_connection_holder_toolbar_screenshot(GtkWidget* widget, RemminaConnectionHolder* cnnhld)
 {
 	TRACE_CALL("remmina_connection_holder_toolbar_screenshot");
@@ -1702,7 +1778,7 @@ static void remmina_connection_holder_toolbar_grab(GtkWidget* widget, RemminaCon
 	remmina_connection_holder_keyboard_grab(cnnhld);
 }
 
-	static GtkWidget*
+static GtkWidget*
 remmina_connection_holder_create_toolbar(RemminaConnectionHolder* cnnhld, gint mode)
 {
 	TRACE_CALL("remmina_connection_holder_create_toolbar");
@@ -1836,6 +1912,7 @@ remmina_connection_holder_create_toolbar(RemminaConnectionHolder* cnnhld, gint m
 	g_signal_connect(G_OBJECT(toolitem), "toggled", G_CALLBACK(remmina_connection_holder_toolbar_preferences), cnnhld);
 	priv->toolitem_preferences = toolitem;
 
+	/* Tools button */
 	toolitem = gtk_toggle_tool_button_new();
 	gtk_tool_button_set_icon_name (GTK_TOOL_BUTTON (toolitem), "system-run");
 	gtk_tool_button_set_label(GTK_TOOL_BUTTON(toolitem), _("Tools"));
@@ -1844,11 +1921,20 @@ remmina_connection_holder_create_toolbar(RemminaConnectionHolder* cnnhld, gint m
 	gtk_widget_show(GTK_WIDGET(toolitem));
 	g_signal_connect(G_OBJECT(toolitem), "toggled", G_CALLBACK(remmina_connection_holder_toolbar_tools), cnnhld);
 	priv->toolitem_tools = toolitem;
-
 	toolitem = gtk_separator_tool_item_new();
 	gtk_toolbar_insert(GTK_TOOLBAR(toolbar), toolitem, -1);
 	gtk_widget_show(GTK_WIDGET(toolitem));
 
+	toolitem = gtk_tool_button_new(NULL, "_PasteFiles");
+	gtk_tool_button_set_icon_name(GTK_TOOL_BUTTON (toolitem), "edit-paste");
+	remmina_connection_holder_set_tooltip(GTK_WIDGET(toolitem), _("Paste files from remote clipboard"), remmina_pref.shortcutkey_pastefiles, 0);
+	gtk_toolbar_insert(GTK_TOOLBAR(toolbar), toolitem, -1);
+	gtk_widget_show(GTK_WIDGET(toolitem));
+	gtk_widget_set_sensitive(GTK_WIDGET(toolitem), FALSE);
+	priv->toolitem_pastefiles = toolitem;
+	g_signal_connect(G_OBJECT(toolitem), "clicked", G_CALLBACK(remmina_connection_holder_toolbar_pastefiles), cnnhld);
+
+	/* Screenshot button */
 	toolitem = gtk_tool_button_new(NULL, "_Screenshot");
 	gtk_tool_button_set_icon_name(GTK_TOOL_BUTTON (toolitem), "camera-photo");
 	remmina_connection_holder_set_tooltip(GTK_WIDGET(toolitem), _("Screenshot"), remmina_pref.shortcutkey_screenshot, 0);
@@ -1856,6 +1942,7 @@ remmina_connection_holder_create_toolbar(RemminaConnectionHolder* cnnhld, gint m
 	gtk_widget_show(GTK_WIDGET(toolitem));
 	g_signal_connect(G_OBJECT(toolitem), "clicked", G_CALLBACK(remmina_connection_holder_toolbar_screenshot), cnnhld);
 
+	/* Minimize button */
 	toolitem = gtk_tool_button_new(NULL, "_Bottom");
 	gtk_tool_button_set_icon_name(GTK_TOOL_BUTTON (toolitem), "go-bottom");
 	remmina_connection_holder_set_tooltip(GTK_WIDGET(toolitem), _("Minimize window"), remmina_pref.shortcutkey_minimize, 0);
@@ -1946,6 +2033,11 @@ static void remmina_connection_holder_update_toolbar(RemminaConnectionHolder* cn
 	toolitem = priv->toolitem_tools;
 	bval = remmina_protocol_widget_query_feature_by_type(REMMINA_PROTOCOL_WIDGET(cnnobj->proto),
 			REMMINA_PROTOCOL_FEATURE_TYPE_TOOL);
+	gtk_widget_set_sensitive(GTK_WIDGET(toolitem), bval);
+
+	toolitem = priv->toolitem_pastefiles;
+	bval = remmina_protocol_widget_query_feature_by_type(REMMINA_PROTOCOL_WIDGET(cnnobj->proto),
+			REMMINA_PROTOCOL_FEATURE_TYPE_PASTEFILES);
 	gtk_widget_set_sensitive(GTK_WIDGET(toolitem), bval);
 
 	gtk_window_set_title(GTK_WINDOW(cnnhld->cnnwin), remmina_file_get_string(cnnobj->remmina_file, "name"));
@@ -2851,7 +2943,6 @@ static void remmina_connection_holder_create_scrolled(RemminaConnectionHolder* c
 	remmina_connection_holder_update_toolbar(cnnhld);
 	remmina_connection_holder_showhide_toolbar(cnnhld, FALSE);
 	remmina_connection_holder_check_resize(cnnhld);
-
 
 }
 

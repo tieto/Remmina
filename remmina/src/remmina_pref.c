@@ -508,6 +508,11 @@ void remmina_pref_init(void)
 	else
 		remmina_pref.shortcutkey_minimize = GDK_KEY_F9;
 
+	if (g_key_file_has_key(gkeyfile, "remmina_pref", "shortcutkey_pastefiles", NULL))
+		remmina_pref.shortcutkey_pastefiles = g_key_file_get_integer(gkeyfile, "remmina_pref", "shortcutkey_pastefiles", NULL);
+	else
+		remmina_pref.shortcutkey_pastefiles = GDK_KEY_v;
+
 	if (g_key_file_has_key(gkeyfile, "remmina_pref", "shortcutkey_screenshot", NULL))
 		remmina_pref.shortcutkey_screenshot = g_key_file_get_integer(gkeyfile, "remmina_pref", "shortcutkey_screenshot", NULL);
 	else
@@ -661,6 +666,7 @@ void remmina_pref_save(void)
 	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_scale", remmina_pref.shortcutkey_scale);
 	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_grab", remmina_pref.shortcutkey_grab);
 	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_screenshot", remmina_pref.shortcutkey_screenshot);
+	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_pastefiles", remmina_pref.shortcutkey_pastefiles);
 	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_minimize", remmina_pref.shortcutkey_minimize);
 	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_disconnect", remmina_pref.shortcutkey_disconnect);
 	g_key_file_set_integer(gkeyfile, "remmina_pref", "shortcutkey_toolbar", remmina_pref.shortcutkey_toolbar);

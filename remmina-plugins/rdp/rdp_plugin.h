@@ -128,7 +128,7 @@ typedef enum
 	REMMINA_RDP_UI_CLIPBOARD_MONITORREADY,
 	REMMINA_RDP_UI_CLIPBOARD_FORMATLIST,
 	REMMINA_RDP_UI_CLIPBOARD_SERVER_FORMAT_DATA_REQUEST,
-	REMMINA_RDP_UI_CLIPBOARD_SET_DATA,
+	REMMINA_RDP_UI_CLIPBOARD_SERVER_FORMAT_LIST,
 	REMMINA_RDP_UI_CLIPBOARD_SET_CONTENT,
 	REMMINA_RDP_UI_CLIPBOARD_DETACH_OWNER,
 	REMMINA_RDP_UI_CLIPBOARD_FILE_CONTENTS_REQUEST
@@ -187,7 +187,7 @@ struct remmina_plugin_rdp_ui_object
 		struct
 		{
 			RemminaPluginRdpUiClipboardType type;
-			GtkTargetList* targetlist;
+			CLIPRDR_FORMAT_LIST *formatList;
 			UINT32 format;
 			gpointer data;
 		} clipboard;
@@ -267,6 +267,7 @@ struct rf_context
 	HANDLE event_handle;
 
 	gulong clipboard_owner_change_handler;
+	gboolean gtk_clipboard_ignore_next_owner_change;
 	struct rf_clipboard* clipboard;
 };
 
