@@ -158,6 +158,7 @@ struct _RemminaConnectionHolder
 enum
 {
 	TOOLBARPLACE_SIGNAL,
+	FILECLIP_OWNER_CHANGE_SIGNAL,
 	LAST_SIGNAL
 };
 
@@ -284,6 +285,10 @@ static void remmina_connection_window_class_init(RemminaConnectionWindowClass* k
 	remmina_connection_window_signals[TOOLBARPLACE_SIGNAL] = g_signal_new("toolbar-place", G_TYPE_FROM_CLASS(klass),
 			G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, G_STRUCT_OFFSET(RemminaConnectionWindowClass, toolbar_place), NULL, NULL,
 			g_cclosure_marshal_VOID__VOID, G_TYPE_NONE, 0);
+	/* Define a signal to notify a status change in fileclip_owner (the owner of files on the clipboard) */
+	remmina_connection_window_signals[FILECLIP_OWNER_CHANGE_SIGNAL] = g_signal_new("fileclip-owner-changed", G_TYPE_FROM_CLASS(klass),
+			G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, G_STRUCT_OFFSET(RemminaConnectionWindowClass, fileclip_owner_changed), NULL, NULL,
+			g_cclosure_marshal_VOID__VOID, G_TYPE_NONE, 0);
 
 }
 
@@ -293,7 +298,6 @@ static void remmina_connection_holder_disconnect_current_page(RemminaConnectionH
 	DECLARE_CNNOBJ
 
 	/* Disconnects the connection which is currently in view in the notebook */
-
 	remmina_protocol_widget_close_connection(REMMINA_PROTOCOL_WIDGET(cnnobj->proto));
 }
 
@@ -438,18 +442,6 @@ static void remmina_connection_window_destroy(GtkWidget* widget, RemminaConnecti
 
 }
 
-gboolean remmina_connection_window_notify_widget_toolbar_placement(GtkWidget *widget, gpointer data)
-{
-	TRACE_CALL("remmina_connection_window_notify_widget_toolbar_placement");
-	GType rcwtype;
-	rcwtype = remmina_connection_window_get_type();
-	if (G_TYPE_CHECK_INSTANCE_TYPE(widget, rcwtype)) {
-		g_signal_emit_by_name(G_OBJECT(widget), "toolbar-place");
-		return TRUE;
-	}
-	return FALSE;
-}
-
 static gboolean remmina_connection_window_tb_drag_failed(GtkWidget *widget, GdkDragContext *context,
 		GtkDragResult result, gpointer user_data)
 {
@@ -503,7 +495,7 @@ static gboolean remmina_connection_window_tb_drag_drop(GtkWidget *widget, GdkDra
 		remmina_pref_save();
 
 		/* Signal all windows that the toolbar must be moved */
-		remmina_widget_pool_foreach(remmina_connection_window_notify_widget_toolbar_placement, NULL);
+		remmina_widget_pool_signal_all_rcw("toolbar-place", NULL);
 
 	}
 	if (priv->toolbar)
@@ -1250,6 +1242,21 @@ static void remmina_connection_holder_update_toolbar_autofit_button(RemminaConne
 		}
 	}
 }
+
+void remmina_connection_holder_update_toolbar_pastefiles_button(RemminaConnectionHolder* cnnhld)
+{
+	TRACE_CALL("remmina_connection_holder_update_toolbar_pastefiles_button");
+	DECLARE_CNNOBJ
+	RemminaConnectionWindowPriv* priv = cnnhld->cnnwin->priv;
+	GtkToolItem* toolitem;
+	gboolean bval;
+
+	toolitem = priv->toolitem_pastefiles;
+	bval = (remmina_protocol_widget_fileclip_get_owner() == REMMINA_PROTOCOL_WIDGET(cnnobj->proto));
+	gtk_widget_set_sensitive(GTK_WIDGET(toolitem), bval);
+
+}
+
 
 static void remmina_connection_holder_toolbar_scaled_mode(GtkWidget* widget, RemminaConnectionHolder* cnnhld)
 {
@@ -2035,10 +2042,7 @@ static void remmina_connection_holder_update_toolbar(RemminaConnectionHolder* cn
 			REMMINA_PROTOCOL_FEATURE_TYPE_TOOL);
 	gtk_widget_set_sensitive(GTK_WIDGET(toolitem), bval);
 
-	toolitem = priv->toolitem_pastefiles;
-	bval = remmina_protocol_widget_query_feature_by_type(REMMINA_PROTOCOL_WIDGET(cnnobj->proto),
-			REMMINA_PROTOCOL_FEATURE_TYPE_PASTEFILES);
-	gtk_widget_set_sensitive(GTK_WIDGET(toolitem), bval);
+	remmina_connection_holder_update_toolbar_pastefiles_button(cnnhld);
 
 	gtk_window_set_title(GTK_WINDOW(cnnhld->cnnwin), remmina_file_get_string(cnnobj->remmina_file, "name"));
 
@@ -2421,6 +2425,13 @@ static void remmina_connection_window_toolbar_place_signal(RemminaConnectionWind
 		g_object_unref(priv->toolbar);
 	}
 }
+static void remmina_connection_window_fileclip_owner_changed_signal(RemminaConnectionWindow* cnnwin, gpointer data)
+{
+	TRACE_CALL("remmina_connection_window_toolbar_place_signal");
+	printf("GIO: remmina_connection_window_fileclip_owner_changed_signal\n");
+	if (cnnwin->priv && cnnwin->priv->cnnhld)
+		remmina_connection_holder_update_toolbar_pastefiles_button(cnnwin->priv->cnnhld);
+}
 
 
 static void remmina_connection_window_init(RemminaConnectionWindow* cnnwin)
@@ -2439,6 +2450,7 @@ static void remmina_connection_window_init(RemminaConnectionWindow* cnnwin)
 	remmina_widget_pool_register(GTK_WIDGET(cnnwin));
 
 	g_signal_connect(G_OBJECT(cnnwin), "toolbar-place", G_CALLBACK(remmina_connection_window_toolbar_place_signal), NULL);
+	g_signal_connect(G_OBJECT(cnnwin), "fileclip-owner-changed", G_CALLBACK(remmina_connection_window_fileclip_owner_changed_signal), NULL);
 }
 
 static gboolean remmina_connection_window_state_event(GtkWidget* widget, GdkEventWindowState* event, gpointer user_data)

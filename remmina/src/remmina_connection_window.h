@@ -60,6 +60,7 @@ typedef struct _RemminaConnectionWindowClass
 {
 	GtkWindowClass parent_class;
 	void (*toolbar_place)(RemminaConnectionWindow *gp);
+	void (*fileclip_owner_changed)(RemminaConnectionWindow *gp);
 } RemminaConnectionWindowClass;
 
 GType remmina_connection_window_get_type(void)

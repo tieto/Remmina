@@ -42,6 +42,7 @@
 #include <glib/gi18n.h>
 #include <stdlib.h>
 
+
 #include "remmina_chat_window.h"
 #include "remmina_connection_window.h"
 #include "remmina_masterthread_exec.h"
@@ -53,6 +54,7 @@
 #include "remmina_ssh.h"
 #include "remmina_log.h"
 #include "remmina/remmina_trace_calls.h"
+#include "remmina_widget_pool.h"
 
 struct _RemminaProtocolWidgetPriv
 {
@@ -99,6 +101,8 @@ typedef struct _RemminaProtocolWidgetSignalData
 
 static guint remmina_protocol_widget_signals[LAST_SIGNAL] =
 { 0 };
+
+static RemminaProtocolWidget* fileclip_owner = NULL;
 
 static void remmina_protocol_widget_class_init(RemminaProtocolWidgetClass *klass)
 {
@@ -1293,3 +1297,20 @@ void remmina_protocol_widget_send_keys_signals(GtkWidget *widget, const guint *k
 		}
 	}
 }
+
+/* Inform remmina that one plugin is owning the clipboard with some files available to paste */
+void remmina_protocol_widget_fileclip_set_owner(RemminaProtocolWidget* gp)
+{
+	TRACE_CALL("remmina_protocol_widget_notify_changed_fileclip_owner");
+	fileclip_owner = gp;
+
+	/* Signal all connection windows that the fileclip_owner has changed */
+	remmina_widget_pool_signal_all_rcw("fileclip-owner-changed", NULL);
+}
+
+RemminaProtocolWidget* remmina_protocol_widget_fileclip_get_owner()
+{
+	TRACE_CALL("remmina_protocol_widget_fileclip_get_owner");
+	return fileclip_owner;
+}
+

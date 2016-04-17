@@ -44,6 +44,7 @@ void remmina_widget_pool_register(GtkWidget *widget);
 GtkWidget* remmina_widget_pool_find(GType type, const gchar *tag);
 GtkWidget* remmina_widget_pool_find_by_window(GType type, GdkWindow *window);
 gint remmina_widget_pool_foreach(RemminaWidgetPoolForEachFunc callback, gpointer data);
+void remmina_widget_pool_signal_all_rcw(gchar* signal, gpointer data);
 
 G_END_DECLS
 

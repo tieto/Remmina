@@ -36,6 +36,7 @@
 #include <gtk/gtk.h>
 #include "remmina_public.h"
 #include "remmina_widget_pool.h"
+#include "remmina_connection_window.h"
 #include "remmina/remmina_trace_calls.h"
 
 static GPtrArray *remmina_widget_pool = NULL;
@@ -149,4 +150,35 @@ gint remmina_widget_pool_foreach(RemminaWidgetPoolForEachFunc callback, gpointer
 	g_ptr_array_unref(wpcpy);
 	return n;
 }
+
+void remmina_widget_pool_signal_all_rcw(gchar* signal, gpointer data)
+{
+	/* Sends the same signal to all registered RemminaConnectionWindow */
+	TRACE_CALL("remmina_widget_pool_signal_all_rcw");
+	GPtrArray *wpcpy = NULL;
+	int i;
+	GType rcwtype;
+	GtkWidget *widget;
+
+	/* Make a copy of remmina_widget_pool, so we can survive when the called
+	 * signal removes an element from remmina_widget_pool */
+
+	wpcpy = g_ptr_array_sized_new(remmina_widget_pool->len);
+	for (i = 0; i < remmina_widget_pool->len; i++)
+		g_ptr_array_add(wpcpy, g_ptr_array_index(remmina_widget_pool, i));
+
+	rcwtype = remmina_connection_window_get_type();
+
+	for (i = 0; i < wpcpy->len; i++) {
+		widget = GTK_WIDGET(g_ptr_array_index(wpcpy, i));
+		if (G_TYPE_CHECK_INSTANCE_TYPE(widget, rcwtype)) {
+			g_signal_emit_by_name(G_OBJECT(widget), signal, data);
+		}
+	}
+
+	g_ptr_array_unref(wpcpy);
+
+}
+
+
 
