@@ -152,6 +152,8 @@ gboolean remmina_protocol_widget_plugin_receives_keystrokes(RemminaProtocolWidge
 void remmina_protocol_widget_send_keystrokes(RemminaProtocolWidget* gp, GtkMenuItem *widget);
 /* Take screenshot of plugin */
 gboolean remmina_protocol_widget_plugin_screenshot(RemminaProtocolWidget* gp, RemminaPluginScreenshotData *rpsd);
+/* Start a file paste operation */
+void remmina_protocol_widget_start_pastefiles(RemminaProtocolWidget* gp, const gchar* destdir);
 
 
 G_END_DECLS

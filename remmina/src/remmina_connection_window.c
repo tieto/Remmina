@@ -1588,12 +1588,6 @@ static gboolean clipboard_has_remmina_files(GtkClipboard *gtkClipboard)
 	return hasrf;
 }
 
-static void cliprqcb(GtkClipboard *clipboard, GtkSelectionData *selection_data, gpointer data)
-{
-	TRACE_CALL("cliprqcb");
-	printf("GIO: in remmina_connection_window.c, this is the callback for file data requested\n");
-}
-
 static void remmina_connection_holder_toolbar_pastefiles(GtkWidget* widget, RemminaConnectionHolder* cnnhld)
 {
 	TRACE_CALL("remmina_connection_holder_toolbar_pastefiles");
@@ -1611,6 +1605,9 @@ static void remmina_connection_holder_toolbar_pastefiles(GtkWidget* widget, Remm
 	if (!clipboard_has_remmina_files(gtkClipboard))
 		return;
 
+	if (remmina_protocol_widget_fileclip_get_owner() != gp)
+		return;
+
 	dialog = gtk_file_chooser_dialog_new (_("Choose destination directory"),
                                       GTK_WINDOW(cnnhld->cnnwin),
                                       GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
@@ -1626,13 +1623,7 @@ static void remmina_connection_holder_toolbar_pastefiles(GtkWidget* widget, Remm
 		char *destdirname;
 		GtkFileChooser *chooser = GTK_FILE_CHOOSER (dialog);
 		destdirname = gtk_file_chooser_get_filename (chooser);
-		printf("GIO: pasting files to %s\n", destdirname);
-
-		/* Ask the clipboard for "x-special/remmina-copied-files", this should start
-		 * the paste operation from the plugin side */
-		GdkAtom atom = gdk_atom_intern(REMMINA_REMOTEFILE_CLIPBOARD_ATOM_NAME, FALSE);
-		gtk_clipboard_request_contents(gtkClipboard, atom, cliprqcb, NULL);
-
+		remmina_protocol_widget_start_pastefiles(gp, destdirname);
 		g_free(destdirname);
 	}
 

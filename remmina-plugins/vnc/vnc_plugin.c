@@ -2090,7 +2090,8 @@ static RemminaProtocolPlugin remmina_plugin_vnci =
 	remmina_plugin_vnc_query_feature,             // Query for available features
 	remmina_plugin_vnc_call_feature,              // Call a feature
 	remmina_plugin_vnc_keystroke,                 // Send a keystroke
-	NULL										  // No screenshot support available
+	NULL,										  // No screenshot support available
+	NULL										  // No paste file support available
 };
 
 G_MODULE_EXPORT gboolean

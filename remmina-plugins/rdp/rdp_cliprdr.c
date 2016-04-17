@@ -253,6 +253,12 @@ static void crlf2lf(UINT8* data, size_t* size)
 	*size = out - data;
 }
 
+void remmina_cliprdr_start_pastefiles(RemminaProtocolWidget *gp, const gchar* destdir)
+{
+	TRACE_CALL("remmina_cliprdr_start_pastefiles");
+	printf("GIO: RDP I have a request to paste my files to %s\n", destdir);
+}
+
 static UINT cliprdr_send_response_filecontents(rfClipboard* clipboard,
 											   UINT32 streamId, UINT32 size,
 											   BYTE* data)

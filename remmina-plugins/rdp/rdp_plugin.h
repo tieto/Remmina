@@ -278,6 +278,7 @@ void rf_uninit(RemminaProtocolWidget* gp);
 void rf_get_fds(RemminaProtocolWidget* gp, void** rfds, int* rcount);
 BOOL rf_check_fds(RemminaProtocolWidget* gp);
 void rf_object_free(RemminaProtocolWidget* gp, RemminaPluginRdpUiObject* obj);
+void remmina_cliprdr_start_pastefiles(RemminaProtocolWidget *gp, const gchar* destdir);
 
 #endif
 

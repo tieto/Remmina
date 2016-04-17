@@ -1402,7 +1402,8 @@ static RemminaProtocolPlugin remmina_rdp =
 	remmina_rdp_query_feature,                    // Query for available features
 	remmina_rdp_call_feature,                     // Call a feature
 	remmina_rdp_keystroke,                        // Send a keystroke
-	remmina_rdp_get_screenshot                    // Screenshot
+	remmina_rdp_get_screenshot,                   // Screenshot
+	remmina_cliprdr_start_pastefiles              // Start pasting remote clipboard files into a local dir
 };
 
 /* File plugin definition and features */
