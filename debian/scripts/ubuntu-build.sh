@@ -45,7 +45,7 @@ while [ "$1" != "" ]; do
             IS_DEV_RELEASE=y
             ;;
         -s|--sersfx)
-            SER_SFX=$2
+            PKG_SFX=$2
             shift
             ;;
         *)
