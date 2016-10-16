@@ -56,7 +56,7 @@ while [ "$1" != "" ]; do
 done
 
 if [ "$IS_DEV_RELEASE" = "y" ]; then
-    REMMINA_PKGVERS="0.9.${DEBSRC_DATE}Ubuntu${PKG_SFX}+GitS${SOURCE_HASH}+P${DEBSRC_HASH}"
+    REMMINA_PKGVERS="0.9.${DEBSRC_DATE}Ubuntu${PKG_SFX}+git${SOURCE_HASH}+${DEBSRC_HASH}"
     SOURCE_SFX="~dev${SOURCE_DATE}"
     SOURCE_DIR="${PKG_NAME}-${REMMINA_VERSION}${SOURCE_SFX}"
 else
