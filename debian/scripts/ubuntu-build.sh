@@ -69,18 +69,16 @@ else
     SOURCE_SFX=""
     SOURCE_DIR="${PKG_NAME}-${REMMINA_VERSION}"
 fi
-
-ABS_SOURCE_DIR="$PWD/${BDIR}/$SOURCE_DIR"
-
-cd "$BDIR"
-mkdir "$SOURCE_DIR"
+SOURCE_ARCHIVE="${PKG_NAME}_${REMMINA_VERSION}${SOURCE_SFX}.orig.tar.gz"
+ABS_SOURCE_ARCHIVE="$PWD/${BDIR}/${SOURCE_ARCHIVE}"
 
 # exports repo without .git folder and other operative system clients
-cd ../../Remmina
-git archive --format tar HEAD | \
-    tar xv -C "${ABS_SOURCE_DIR}"
+cd ../Remmina
+git archive --prefix "$SOURCE_DIR/" --format tar HEAD | gzip -n > "$ABS_SOURCE_ARCHIVE"
 cd -
-tar zcvf "${PKG_NAME}_${REMMINA_VERSION}${SOURCE_SFX}.orig.tar.gz" "$SOURCE_DIR"
+cd "$BDIR"
+
+tar zxvf "${SOURCE_ARCHIVE}"
 
 for serie in yakkety wily xenial trusty; do
     mv "$SOURCE_DIR" "$PKG_NAME"
@@ -103,7 +101,7 @@ EOF
     debuild -eUBUNTU_SERIE="$serie" -S -sa # add ' -us -uc' flags to avoid signing
     cd ..
     rm -rf "${PKG_NAME}"
-    tar zxvf "${PKG_NAME}_${REMMINA_VERSION}${SOURCE_SFX}.orig.tar.gz"
+    tar zxvf "${SOURCE_ARCHIVE}"
 done
 
 echo "now cd in ${BDIR} directory and run:"
