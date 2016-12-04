@@ -1,7 +1,83 @@
-remmina (1.2.0-rcgit16-1.0ubuntu0) trusty; urgency=low
-  * Experimental build.
+remmina (1.2.0-rcgit-16-1.0ubuntu0) unstable; urgency=low
 
- -- Matteo Nastasi <nastasi@alternativeoutput.it>  Fri, 14 Oct 2016 08:57:59 +0200
+  [Antenore Gatta (https://github.com/antenore)]
+  * XDG base directory spec
+  * When focus-in inside the quick search, select the whole text as per "Auto-Highlight Quick Search Text Upon Each Remote Session Launch"
+  * Add man pages
+  * New gettext strings, closed "untranslated lines missed" issue
+  * Grab focus without selecting text in the remmina file editor
+
+  [Davy Defaud (https://github.com/DevDef)]
+  * Update French translation
+
+  [Diogo Pereira (https://github.com/diogocp)]
+  * make gettext *really* behave correctly
+
+  [e-alfred (https://github.com/e-alfred)]
+  * Show information on upgrade libssh to 0.7.X
+
+  [Giovanni Panozzo (https://github.com/giox069)]
+  * Fixes workspace detection outside X11 backend.
+  * Improves focus in/out detection when keyboard is captured
+  * Implementing RDP remote scaling and orientation
+
+  [Julian Ospald (https://github.com/hasufell)]
+  * CMAKE: fix GNUInstallDirs usage
+
+  [larchunix (https://github.com/larchunix)]
+  * spice: send a notification at the end of file transfers
+  * spice: show progress of drag & drop file transfers
+
+  [Balázs Meskó (https://github.com/meskobalazs)]
+  * Updated Hungarian translation
+
+  [morph027 (https://github.com/morph027)]
+  * updated german translation
+
+  [Jennifer Herting (https://github.com/qwertos)]
+  * Update name
+
+  * Add RDP scaling factor as implemented by FreeRDP
+  * Please add man pages for remmina
+  * Please support XDG base directory spec
+  * Auto-Highlight Quick Search Text Upon Each Remote Session Launch
+  * spice support
+  * SSH: Secure Shell Issue
+  * Auto-highlighted "Quick Connect" connection name within new connection dialog copies the words "Quick Connect" into PRIMARY selection
+  * can't connect to 2008r2 when set "negotiation" security mode
+  * crash of remmina when terminal bell rings
+  * Support for left-handed mouse
+  * Segmentation error on Gnome Desktop with Wayland
+  * untranslated lines missed
+  * Security Issue?
+  * remmina fails to compile against freerdp
+  * VNC connection doesn't work if color is set to 256 colors (8 bpp)
+  * remmina.org down
+  * Random remmina exits (no crash, just plain close)
+  * spice plugin missing on Ubuntu PPA
+  * Arch Linux: Unable to load RDP plugin
+  * Not work Copy&paste between Keepass2 and Remmina
+  * Can't connect to certain hosts after update
+  * Huge icons in toolbar in some desktop environments
+  * Regression in RDP plugin   * no ipv6 support
+  * RDP on Custom Port
+  * Provide a different icon for the tray icon
+  * Segfault after login by rdp
+  * Remmina in Fullscreen does hide Panels on other unused monitors in gnome
+  * Regression: Connections scrolling dissapeared
+  * Remmina Hangs/Stucks at second login to RD Server
+  * Cant see the Windows login screen while RDPing to a machine
+  * LIBVNCSERVER_WITH_CLIENT_TLS is never defined
+  * Cannot connect to VNC servers using IPv6
+  * Connection window disappears when minimized
+  * build fails with -DWITH_GETTEXT=OFF
+  * remmina rdp session freeze or hide
+  * Cut & Paste
+  * Vertical resolution of RDP host not being determined correctly
+  * Regression: In remmina 1.0 tray menu right click editing broken
+  * do ssh server host key check with the NX plugin
+
+ -- Matteo Nastasi <nastasi@alternativeoutput.it>  Sun, 04 Dec 2016 18:43:41 +0100
 
 remmina (1.2.0~rcgit-14) unstable; urgency=low
 
