@@ -38,8 +38,9 @@ build-arch: $(call dh_subst_files,$(DEB_ARCH_PACKAGES))
 override_dh_install:
 	dh_install
 	[ -d debian/remmina-common ] && \
+                rm -rf $(CURDIR)/debian/remmina-common/usr/share/man && \
 		find $(CURDIR)/debian/remmina-common -name "*remmina.desktop" -delete && \
-		find $(CURDIR)/debian/remmina-common -type d -empty -delete || true
+                find $(CURDIR)/debian/remmina-common -type d -empty -delete || true
 
 override_dh_installchangelogs:
 	dh_installchangelogs ChangeLog
