@@ -1,7 +1,7 @@
-remmina (1.2.0-rcgit-16-1.0ubuntu0-dev) unstable; urgency=low
+remmina (1.2.0-rcgit-16-1.1ubuntu0) unstable; urgency=low
 
   [Matteo Nastasi (https://github.com/nastasi)]
-  * New git-based building system [2]
+  * New git-based building system [3]
 
  -- Matteo Nastasi <nastasi@alternativeoutput.it>  Thu, 08 Dec 2016 16:36:13 +0100
 
