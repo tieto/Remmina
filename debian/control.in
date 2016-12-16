@@ -19,7 +19,6 @@ Build-Depends: debhelper (>= 9~),
  libvncserver-dev,
  libappindicator3-dev,
  libsecret-1-dev,
- libwebkit2gtk-4.0-dev | libwebkit2gtk-3.0-dev,
  libspice-protocol-dev @REMMINA_PLUGIN_SPICE_BUILDDEPS_ARCHS@,
  libspice-client-gtk-3.0-dev @REMMINA_PLUGIN_SPICE_BUILDDEPS_ARCHS@ | libspice-client-gtk-2.0-dev @REMMINA_PLUGIN_SPICE_BUILDDEPS_ARCHS@
 Standards-Version: 3.9.6
