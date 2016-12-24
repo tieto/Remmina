@@ -96,7 +96,7 @@ ${PKG_NAME} (${REMMINA_VERSION}${SOURCE_SFX}-${REMMINA_PKGVERS}~${serie}) ${seri
 EOF
         cat ../../debian/changelog  >>debian/changelog
     else
-        sed "1 s/unstable/${serie}/g;s/)/~${serie})/g" < ../../debian/changelog >debian/changelog
+        sed "s/^\([^ ].*\)unstable/\1${serie}/g;s/^\([^ ].*\))/\1~${serie})/g" ../../debian/changelog >debian/changelog
     fi
     debuild -eUBUNTU_SERIE="$serie" -S -sa # add ' -us -uc' flags to avoid signing
     cd ..
