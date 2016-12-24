@@ -80,7 +80,7 @@ cd "$BDIR"
 
 tar zxvf "${SOURCE_ARCHIVE}"
 
-for serie in yakkety wily xenial trusty; do
+for serie in yakkety xenial trusty; do
     mv "$SOURCE_DIR" "$PKG_NAME"
     cp -a ../debian "${PKG_NAME}/"
     cd "${PKG_NAME}"

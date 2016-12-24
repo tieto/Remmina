@@ -1,9 +1,61 @@
+remmina (1.2.0-rcgit-17-1.0ubuntu0) unstable; urgency=low
+
+  [Marco Trevisan (https://github.com/3v1n0)]
+  * Customizable app name and locations
+  * remmina.desktop: add Quit desktop action for Unity
+
+  [Antenore Gatta (https://github.com/antenore)]
+  * Import gateay values from rdp files
+  * Updated Russian translations
+  * Removed survey to clean up the code - API CHANGE
+  * When 'Server' GtkComboBox is selected, TAB doesn't work
+
+  [Davy Defaud (https://github.com/DevDef)]
+  * Update fr.po
+
+  [Giovanni Panozzo (https://github.com/giox069)]
+  * Libfreerdp updates
+
+  [Jose Gregorio Jimenez Sanchez (https://github.com/jgjimenez)]
+  * Update Spanish Translation
+
+  [Matteo Nastasi (https://github.com/nastasi)]
+  * No debian/ubuntu distributions files included.
+
+  [Shuhrat Dehkanov (https://github.com/ozbek)]
+  * Uzbek cyrillic: update translations
+
+  [Sylvain Pasche (https://github.com/spasche)]
+  * Fix fullscreen window position
+
+  [theraser (https://github.com/theraser)]
+  * Updated German translation
+
+  * Remove survey as too bloated.
+  * Cannot connect to neoma-bs RDP server
+  * When "Server" GtkComboBox is selected, TAB key doesn't work
+  * Advanced Settings for RDP connections
+  * error: ‘rdpGdi {aka struct rdp_gdi}’ has no member named ‘bytesPerPixel’
+  * Remmina crashes attempting VNC connection to Mac OS X Yosemite
+  * Remmina can no longer recognize RDP authentication failure
+  * SSH-Tunneled VNC connection randomly hangs
+  * Long connection times when forwarding RDP connections through SSH
+  * Issue with PPA mentioned in Wiki
+  * Remmina crashes copying from remoted computer and pasting into remoting one
+  * font smoothing - some fonts are not smoothed
+  * Remmina blocks and I have to disconnect every 20 minutes
+  * Keyboard Mapping
+  * Remmina crash when running towards server with xrdp 0.7.0
+  * Resolution of Client Viewport not functioning correct
+
+ -- Matteo Nastasi <nastasi@alternativeoutput.it>  Sat, 24 Dec 2016 11:52:51 +0100
+
 remmina (1.2.0-rcgit-16-1.1ubuntu0) unstable; urgency=low
 
   [Matteo Nastasi (https://github.com/nastasi)]
   * New git-based building system [3]
 
- -- Matteo Nastasi <nastasi@alternativeoutput.it>  Thu, 08 Dec 2016 16:36:13 +0100
+ -- Matteo Nastasi <nastasi@alternativeoutput.it>  Sat, 24 Dec 2016 15:25:32 +0100
 
 remmina (1.2.0-rcgit-16-1.0ubuntu0) unstable; urgency=low
 
