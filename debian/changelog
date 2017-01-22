@@ -1,3 +1,10 @@
+remmina (1.2.0-rcgit-17-1.1ubuntu1) unstable; urgency=low
+  [Matteo Nastasi (https://github.com/nastasi)]
+  * Rebuild with FreeRDP library
+    version 2.0.0~dev201701161718+dfsg-1ubuntu0~git1046c95
+
+ -- Matteo Nastasi <nastasi@alternativeoutput.it>  Sun, 22 Jan 2017 11:37:06 +0100
+
 remmina (1.2.0-rcgit-17-1.0ubuntu1) unstable; urgency=low
 
   [Marco Trevisan (https://github.com/3v1n0)]
