@@ -1,3 +1,19 @@
+remmina (1.2.0-rcgit-18-1.0ubuntu1) unstable; urgency=low
+
+  * Updated russian, english, italian and french translations.
+
+  [Antenore Gatta (https://github.com/antenore)]
+  * Better fullscreen management
+  * Improved 'Pre command' tooltip
+
+  [Marco Trevisan (https://github.com/3v1n0)]
+  * Add 'make snap' command
+
+  [Giovanni Panozzo (https://github.com/giox069)]
+  * Improved keyboard grabbing
+
+ -- Matteo Nastasi <nastasi@alternativeoutput.it>  Sun, 19 Feb 2017 11:01:51 +0100
+
 remmina (1.2.0-rcgit-17-1.1ubuntu1) unstable; urgency=low
   [Matteo Nastasi (https://github.com/nastasi)]
   * Rebuild with FreeRDP library
