@@ -1,7 +1,7 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: remmina
-Upstream-Contact: Marc-Andre Moreau <marcandre.moreau@gmail.com>
-Source:  http://remmina.sourceforge.net
+Upstream-Contact: admin@remmina.org
+Source:  http://www.remmina.org
 
 Files: *
 Copyright: 2009-2011, Vic Lee
@@ -11,6 +11,7 @@ Copyright: 2009-2011, Vic Lee
            2012, Jean-Louis Dupond
            2012, Andrey Gankov
            2012, Luca Falavigna
+           2015-2017, Antenore Gatta and Giovanni Panozzo
 License: GPL-2+
 
 Files: cmake/FindOptionalPackage.cmake
