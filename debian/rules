@@ -31,6 +31,9 @@ clean:: debian/control
 	touch debian/control.in
 	rm -f $(call dh_subst_files,$(DEB_ALL_PACKAGES))
 
+override_dh_auto_configure:
+	dh_auto_configure -- -DWITH_LIBSSH=OFF
+
 # Add dependencies to generate files from the debian/*.in ones
 build-indep: $(call dh_subst_files,$(DEB_INDEP_PACKAGES))
 build-arch: $(call dh_subst_files,$(DEB_ARCH_PACKAGES))
