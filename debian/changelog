@@ -1,4 +1,4 @@
-remmina (1.2.0-rcgit-18-0+remmina2) unstable; urgency=low
+remmina (1.2.0~rcgit-0+remmina2) unstable; urgency=low
 
   * debian/rules: recognize UBUNTU_SERIE by debian/changelog too
   * Changes to build against freerdp2 in zesty keeping freerdp compatibility:
