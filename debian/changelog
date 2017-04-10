@@ -1,3 +1,14 @@
+remmina (1.2.0-rcgit-18-0+remmina2) unstable; urgency=low
+
+  * debian/rules: recognize UBUNTU_SERIE by debian/changelog too
+  * Changes to build against freerdp2 in zesty keeping freerdp compatibility:
+    + debian/control{,.in}:
+      - add libfreerdp-dev (>= 2.0.0~) | freerdp2-dev in Build-Depends field
+      - add libfreerdp-plugins-standard (>= 2.0.0~) | libfreerdp-client2 in
+        remmina-plugin-rdp Depends field
+
+ -- Devid Antonio Filoni <d.filoni@ubuntu.com>  Mon, 10 Apr 2017 19:26:06 +0200
+
 remmina (1.2.0-rcgit-18-1.0ubuntu1) unstable; urgency=low
 
   * Updated russian, english, italian and french translations.
